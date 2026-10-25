@@ -1824,7 +1824,8 @@ async function sendFile(file, kind){
   const record={id,convId:State.convId,from:"me",kind,mime:file.type,transferId,ts:now,
     expiresAt:now+State.ttlMs,status:State.peerConnected?"sending":"queued",progress:0,_localUrl:localUrl};
   const stored={...record,_localUrl:undefined,blob:file};
-  await Store.put("messages",stored);
+  try { await Store.put("messages",stored); }
+  catch(e) { URL.revokeObjectURL(localUrl); pushSystemLine("Espace de stockage insuffisant sur cet appareil pour conserver ce fichier.",true); return; }
   renderMessage(record);
   await saveConversationPatch(State.convId,{
     lastMessage:kind==="image"?"Vous : photo":kind==="video"?"Vous : vidéo":"Vous : message vocal",
@@ -1910,6 +1911,12 @@ async function receiveChunk(msg){
     const blob=new Blob([full],{type:transfer.mime||"application/octet-stream"});
     State.incomingTransfers.delete(transferId);
     const id=State.convId+"-peer-f-"+transferId, now=Date.now();
+    const existing=await Store.get("messages",id);
+    if(existing){
+      removePendingBubble(State.convId+"-recv-"+transferId);
+      await sendEncryptedControl({type:"file-received",transferId:transferId});
+      return;
+    }
     const record={id:id,convId:State.convId,from:"peer",kind:transfer.kind,mime:transfer.mime,transferId:transferId,
       ts:now,expiresAt:now+State.ttlMs,status:"received",blob:blob};
     await Store.put("messages",record);
@@ -2429,6 +2436,8 @@ $("btnRecord").addEventListener("click", () => {
 $("btnSettings").addEventListener("click", () => $("settingsOverlay").classList.remove("hidden"));
 $("btnEnableNotifications").addEventListener("click", async () => {
   try {
+    localStorage.setItem("confidant.notifications","yes");
+    playMessageSound();
     if (window.ConfidantAndroid && typeof window.ConfidantAndroid.requestNotifications === "function") {
       localStorage.setItem("confidant.notifications","yes");
       window.ConfidantAndroid.requestNotifications();
@@ -2482,6 +2491,7 @@ window.addEventListener("beforeunload", () => {
 (async function init(){
   try {
     await Store.cleanupExpired();
+    if (localStorage.getItem("confidant.notifications")==="yes") $("btnEnableNotifications").textContent="Notifications activées";
     await refreshConversationList();
     if ((location.hash && location.hash.includes("id=")) || new URLSearchParams(location.search).has("id")) {
       await joinFromLink(location.href);
