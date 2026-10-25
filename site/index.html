@@ -1260,6 +1260,11 @@ function scheduleReconnect(convId, signalingLost){
       setTimeout(() => {
         if (State.convId !== convId || State.peer !== peer || State.peerConnected || peer.destroyed) return;
         if (State.conn && State.conn.open) return;
+        if (State.conn) {
+          const previousConn = State.conn;
+          State.conn = null;
+          try { previousConn.close(); } catch (e) {}
+        }
         try {
           const conn = peer.connect(State.remotePeerId, {reliable:true});
           State.conn = conn;
@@ -1511,8 +1516,8 @@ function wireConnection(conn, isCreator){
     if (State.convId === boundConvId && State.conn === conn) handleIncoming(msg,isCreator,conn);
   });
   conn.on("close", async () => {
-    if (State.convId !== boundConvId) return;
-    if (State.conn === conn) State.conn = null;
+    if (State.convId !== boundConvId || State.conn !== conn) return;
+    State.conn = null;
     State.peerConnected = false; State.sessionKey = null; State.incomingTransfers = new Map();
     try { await requeueUnconfirmedTexts(boundConvId); } catch(e) {}
     saveConversationPatch(boundConvId,{connectionStatus:"offline",lastActivity:Date.now()}).catch(()=>{});
@@ -1526,7 +1531,7 @@ function wireConnection(conn, isCreator){
     }
   });
   conn.on("error", () => {
-    if (State.convId !== boundConvId) return;
+    if (State.convId !== boundConvId || State.conn !== conn) return;
     State.peerConnected = false; State.sessionKey = null;
     updateChatStatus("error","Erreur de connexion"); scheduleReconnect(boundConvId,false);
   });
@@ -1604,6 +1609,44 @@ function updateChatStatus(kind, text){
 
   $("chatStatusText").textContent = text;
 
+}
+
+let notificationAudioContext = null;
+let notificationRegistration = null;
+
+function playMessageSound(){
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    notificationAudioContext = notificationAudioContext || new AudioContextClass();
+    if (notificationAudioContext.state === "suspended") notificationAudioContext.resume();
+    const oscillator = notificationAudioContext.createOscillator();
+    const gain = notificationAudioContext.createGain();
+    oscillator.type = "sine";
+    oscillator.frequency.value = 660;
+    gain.gain.setValueAtTime(0.0001, notificationAudioContext.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.055, notificationAudioContext.currentTime + 0.025);
+    gain.gain.exponentialRampToValueAtTime(0.0001, notificationAudioContext.currentTime + 0.22);
+    oscillator.connect(gain); gain.connect(notificationAudioContext.destination);
+    oscillator.start(); oscillator.stop(notificationAudioContext.currentTime + 0.23);
+  } catch (e) {}
+}
+
+async function notifyIncomingMessage(body){
+  try {
+    if (localStorage.getItem("confidant.notifications") !== "yes") return;
+    playMessageSound();
+    if (window.ConfidantAndroid && typeof window.ConfidantAndroid.notifyMessage === "function") {
+      window.ConfidantAndroid.notifyMessage("Confidant", String(body || "Nouveau message"));
+      return;
+    }
+    if ("Notification" in window && Notification.permission === "granted") {
+      const options = {body:String(body || "Nouveau message"), tag:"confidant-" + (State.convId || "message"), renotify:true};
+      if (notificationRegistration && notificationRegistration.showNotification) {
+        await notificationRegistration.showNotification("Confidant", options);
+      } else new Notification("Confidant", options);
+    }
+  } catch (e) {}
 }
 
 
@@ -1698,7 +1741,9 @@ async function receiveTextMessage(msg){
   await Store.put("messages",record);
   await saveConversationPatch(State.convId,{recvCounter:State.recvCounter,
     lastMessage:"Correspondant : "+content.replace(/\s+/g," ").slice(0,120),lastActivity:now,connectionStatus:"connected"});
-  renderMessage(record); await sendMessageAck(record.id,msg.sender);
+  renderMessage(record);
+  await notifyIncomingMessage(content.length > 90 ? content.slice(0,87) + "…" : content);
+  await sendMessageAck(record.id,msg.sender);
 }
 
 async function sendEncryptedControl(payload){
@@ -1891,6 +1936,7 @@ async function receiveChunk(msg){
     await Store.put("messages",record);
     await saveConversationPatch(State.convId,{lastMessage:transfer.kind==="image"?"Photo reçue":transfer.kind==="video"?"Vidéo reçue":"Message vocal reçu",lastActivity:now});
     removePendingBubble(State.convId+"-recv-"+transferId); renderMessage(record);
+    await notifyIncomingMessage(transfer.kind === "image" ? "Nouvelle photo" : transfer.kind === "video" ? "Nouvelle vidéo" : "Nouveau message vocal");
     await sendEncryptedControl({type:"file-received",transferId:transferId});
   }
 }
