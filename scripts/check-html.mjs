@@ -18,6 +18,15 @@ const checks = [
   ["Control messages are encrypted", html.includes("async function handleEncryptedControl(msg)") && html.includes('msg.t === "control"')],
   ["No direct unencrypted delete-request route", !html.includes('msg.t === "delete-request"')],
   ["Reconnect attempts are bounded", html.includes("[1000,2000,4000,8000,15000][State.reconnectAttempts++]")],
+  ["Integrated QR scan action exists", html.includes('id="btnScanInvite"') && html.includes("async function startQrScanner()")],
+  ["QR scanner supports camera APIs", html.includes("BarcodeDetector") && html.includes("jsQR(frame.data")],
+  ["QR intent has browser fallback", html.includes("buildQrInviteLink()") && html.includes("S.browser_fallback_url")],
+  ["Invitations can be opened from query parameters", html.includes("new URLSearchParams(location.search).has("id")")],
+  ["Android mobile input adjusts to keyboard", html.includes("visualViewport") && html.includes("--keyboard-bottom")],
+  ["Reconnect ignores stale connection events", html.includes("State.conn !== conn) return;")],
+  ["Offline media queue is present", html.includes("async function transmitFileRecord") && html.includes("requeueUnconfirmedFiles")],
+  ["Saved chats reopen without another invitation", html.includes('showScreen("chatScreen");') && html.includes("async function resumeConversation")],
+  ["Message notification hook exists", html.includes("async function notifyIncomingMessage") && html.includes("btnEnableNotifications")],
   ["No malformed escaped scheme", !html.includes("https\\://")]
 ];
 let failed = false;
