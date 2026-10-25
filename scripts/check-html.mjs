@@ -28,11 +28,11 @@ if (!inlineScripts.length) {
 } else {
   for (const [index, script] of inlineScripts.entries()) {
     try {
-      new vm.Script(script, { filename: \`site/index.html:inline-\${index + 1}.js\` });
+      new vm.Script(script, { filename: "site/index.html:inline-" + (index + 1) + ".js" });
     } catch (error) {
       console.error("FAIL: JavaScript syntax:", error.message);
       process.exitCode = 1;
     }
   }
-  if (!process.exitCode) console.log(\`PASS: syntax of \${inlineScripts.length} inline script(s)\`);
+  if (!process.exitCode) console.log("PASS: syntax of " + inlineScripts.length + " inline script(s)");
 }
