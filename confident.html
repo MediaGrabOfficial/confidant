@@ -953,7 +953,9 @@ const State = {
 
   ttlMs: 30*24*3600*1000,
 
-  incomingTransfers: new Map(), // transferId -> {chunks:[], total, received, mime, kind, size}
+  incomingTransfers: new Map(), // transferId -> {chunks:[], total, received, mime, kind, size
+
+  seenControlNonces: new Set(),
 
   cleanupTimer: null
 
@@ -1440,114 +1442,104 @@ function explainPeerError(err){
 /* ---------- Câblage commun de la DataConnection ---------- */
 
 function wireConnection(conn, isCreator){
-
-  conn.on("open", async () => {
-
-    if (isCreator){
-
-      // on attend le "hello" de l'invité
-
-    } else {
-
-      conn.send({ t: "hello", pub: State.myPubB64 });
-
+  const boundConvId = State.convId;
+  conn.on("open", () => {
+    if (State.convId !== boundConvId || State.conn !== conn) return;
+    if (!isCreator) {
+      try { conn.send({t:"hello",pub:State.myPubB64,id:State.myId}); }
+      catch(e) { scheduleReconnect(boundConvId,false); }
     }
-
   });
-
-  conn.on("data", (msg) => handleIncoming(msg, isCreator, conn));
-
-  conn.on("close", () => {
-
-    State.peerConnected = false;
-
-    updateChatStatus("disconnected", "Déconnecté");
-
-    pushSystemLine("Votre correspondant s'est déconnecté.", false);
-
+  conn.on("data", msg => {
+    if (State.convId === boundConvId && State.conn === conn) handleIncoming(msg,isCreator,conn);
   });
-
+  conn.on("close", async () => {
+    if (State.convId !== boundConvId) return;
+    if (State.conn === conn) State.conn = null;
+    State.peerConnected = false; State.sessionKey = null; State.incomingTransfers = new Map();
+    try { await requeueUnconfirmedTexts(boundConvId); } catch(e) {}
+    saveConversationPatch(boundConvId,{connectionStatus:"offline",lastActivity:Date.now()}).catch(()=>{});
+    if (State.role === "creator") {
+      setInviteStatus("waiting","Déconnecté — invitation toujours valable");
+      updateChatStatus("disconnected","Déconnecté"); showScreen("inviteScreen");
+    } else {
+      updateChatStatus("disconnected","Déconnecté — nouvelle tentative");
+      pushSystemLine("Votre correspondant s'est déconnecté. Les messages non confirmés restent sur cet appareil.",false);
+      scheduleReconnect(boundConvId,false);
+    }
+  });
   conn.on("error", () => {
-
-    State.peerConnected = false;
-
-    updateChatStatus("error", "Erreur de connexion");
-
+    if (State.convId !== boundConvId) return;
+    State.peerConnected = false; State.sessionKey = null;
+    updateChatStatus("error","Erreur de connexion"); scheduleReconnect(boundConvId,false);
   });
-
 }
 
-
-
-async function handleIncoming(msg, isCreator, conn){
-
+async function handleIncoming(msg,isCreator,conn){
   if (!msg || typeof msg !== "object") return;
-
-
-
-  if (msg.t === "hello"){
-
-    State.theirPubB64 = msg.pub;
-
-    conn.send({ t: "hello-ack", pub: State.myPubB64 });
-
-    await finalizeSession();
-
-    return;
-
+  if (msg.t === "hello") {
+    if (!msg.pub || !State.myPubB64) return;
+    if ((State.remotePeerId && State.remotePeerId !== conn.peer) ||
+        (State.theirPubB64 && State.theirPubB64 !== msg.pub)) {
+      pushSystemLine("Connexion refusée : l'identifiant ou la clé du correspondant a changé.",true);
+      try { conn.close(); } catch(e) {}
+      return;
+    }
+    State.remotePeerId=conn.peer; State.theirPubB64=msg.pub;
+    try { conn.send({t:"hello-ack",pub:State.myPubB64,id:State.myId}); } catch(e) {}
+    await saveConversationPatch(State.convId,{remotePeerId:State.remotePeerId,theirPubB64:State.theirPubB64});
+    await finalizeSession(); return;
   }
-
-  if (msg.t === "hello-ack"){
-
-    State.theirPubB64 = State.theirPubB64 || msg.pub;
-
-    await finalizeSession();
-
-    return;
-
+  if (msg.t === "hello-ack") {
+    if (!msg.pub || (State.remotePeerId && State.remotePeerId !== conn.peer) ||
+        (State.theirPubB64 && State.theirPubB64 !== msg.pub)) {
+      pushSystemLine("La clé reçue ne correspond pas à cette invitation. Connexion refusée.",true);
+      try { conn.close(); } catch(e) {}
+      return;
+    }
+    State.remotePeerId=conn.peer; State.theirPubB64=msg.pub;
+    await saveConversationPatch(State.convId,{remotePeerId:State.remotePeerId,theirPubB64:State.theirPubB64});
+    await finalizeSession(); return;
   }
-
-  if (msg.t === "msg"){ await receiveTextMessage(msg); return; }
-
-  if (msg.t === "chunk"){ await receiveChunk(msg); return; }
-
-  if (msg.t === "delete-request"){ await handleDeleteRequest(msg); return; }
-
+  if (msg.t === "msg") { await receiveTextMessage(msg); return; }
+  if (msg.t === "ack") { await handleMessageAck(msg); return; }
+  if (msg.t === "chunk") { await receiveChunk(msg); return; }
+  if (msg.t === "control") { await handleEncryptedControl(msg); return; }
 }
-
-
 
 async function finalizeSession(){
-
-  if (State.sessionKey) return; // déjà fait
-
-  State.sessionKey = await Crypto.deriveSessionKey(
-
-    State.keyPair.privateKey, await Crypto.importPub(State.theirPubB64),
-
-    State.myPubB64, State.theirPubB64
-
-  );
-
-  State.peerConnected = true;
-
-  showScreen("chatScreen");
-
-  updateChatStatus("connected", "Connecté — chiffré de bout en bout");
-
-  const fp = await Crypto.fingerprint(State.myPubB64, State.theirPubB64);
-
-  $("fingerprintBox").textContent = fp;
-
-  pushSystemLine("Connexion établie. Comparez l'empreinte dans les réglages pour confirmer l'identité de votre correspondant.", false);
-
-  await loadHistory();
-
-  startCleanupLoop();
-
+  if (State.peerConnected || !State.keyPair || !State.theirPubB64) return;
+  try {
+    State.sessionKey=await Crypto.deriveSessionKey(State.keyPair.privateKey,
+      await Crypto.importPub(State.theirPubB64),State.myPubB64,State.theirPubB64);
+  } catch(e) {
+    State.sessionKey=null; State.peerConnected=false;
+    updateChatStatus("error","Échec de l'accord de clé");
+    pushSystemLine("Impossible d'établir la clé de session. Cette connexion a été interrompue.",true);
+    if (State.conn) try { State.conn.close(); } catch(ignore) {}
+    return;
+  }
+  State.peerConnected=true; State.reconnectAttempts=0;
+  if (State.reconnectTimer) clearTimeout(State.reconnectTimer);
+  State.reconnectTimer=null; State.seenControlNonces=new Set();
+  setLastConversation(State.convId); showScreen("chatScreen");
+  updateChatStatus("connected","Connecté · canal chiffré");
+  $("fingerprintBox").textContent=await Crypto.fingerprint(State.myPubB64,State.theirPubB64);
+  pushSystemLine("Connexion établie. Comparez l'empreinte par un autre canal pour vérifier l'identité.",false);
+  await saveConversationPatch(State.convId,{theirPubB64:State.theirPubB64,remotePeerId:State.remotePeerId,
+    connectionStatus:"connected",lastActivity:Date.now()});
+  await loadHistory(); startCleanupLoop(); await flushQueuedMessages();
 }
 
-
+async function requeueUnconfirmedTexts(convId){
+  const messages=await Store.allByConv(convId);
+  for (const record of messages) {
+    if (record.from==="me" && record.kind==="text" && ["sending","sent"].includes(record.status)) {
+      record.status="queued"; await Store.put("messages",record);
+      if (State.convId===convId) updateMessageStatus(record);
+    }
+  }
+}
 
 function updateChatStatus(kind, text){
 
@@ -1562,92 +1554,132 @@ function updateChatStatus(kind, text){
 /* ======================= ENVOI / RÉCEPTION — TEXTE ======================= */
 
 async function sendTextMessage(text){
-
-  if (!State.peerConnected){ pushSystemLine("Pas de connexion active : message non envoyé.", true); return; }
-
-  const counter = ++State.sendCounter;
-
-  const id = State.convId + "-" + State.myId + "-" + counter;
-
-  const plaintext = enc.encode(text);
-
-  const aad = `${State.convId}|${counter}|${State.myId}|text`;
-
-  const { iv, ct } = await Crypto.encrypt(State.sessionKey, aad, plaintext);
-
-
-
-  const record = {
-
-    id, convId: State.convId, from: "me", kind: "text", text,
-
-    ts: Date.now(), expiresAt: Date.now() + State.ttlMs, status: "sending"
-
-  };
-
-  await Store.put("messages", record);
-
+  const clean=String(text||"");
+  if (!clean.trim() || !State.convId || !State.myId) return;
+  const counter=++State.sendCounter, id=State.convId+"-"+State.myId+"-"+counter, now=Date.now();
+  const record={id:id,convId:State.convId,from:"me",kind:"text",text:clean,counter:counter,sender:State.myId,
+    ts:now,expiresAt:now+State.ttlMs,status:"queued"};
+  await Store.put("messages",record);
+  await saveConversationPatch(State.convId,{sendCounter:State.sendCounter,
+    lastMessage:"Vous : "+clean.replace(/\s+/g," ").slice(0,120),lastActivity:now,
+    connectionStatus:State.peerConnected?"connected":"offline"});
   renderMessage(record);
-
-
-
-  try{
-
-    State.conn.send({ t:"msg", counter, sender: State.myId, iv, ct });
-
-    record.status = "sent";
-
-  } catch(e){
-
-    record.status = "failed";
-
-  }
-
-  await Store.put("messages", record);
-
-  updateMessageStatus(record);
-
+  if (State.peerConnected) await transmitTextRecord(record);
 }
 
+async function transmitTextRecord(record){
+  const convId=record.convId, conn=State.conn, key=State.sessionKey, sender=State.myId;
+  if (!State.peerConnected || !conn || !key || State.convId!==convId) {
+    record.status="queued"; await Store.put("messages",record); updateMessageStatus(record); return;
+  }
+  record.status="sending"; await Store.put("messages",record); updateMessageStatus(record);
+  try {
+    const aad=convId+"|"+record.counter+"|"+sender+"|text";
+    const encrypted=await Crypto.encrypt(key,aad,enc.encode(record.text));
+    if (State.convId!==convId || State.conn!==conn) record.status="queued";
+    else {
+      conn.send({t:"msg",id:record.id,counter:record.counter,sender:sender,iv:encrypted.iv,ct:encrypted.ct});
+      record.status="sent";
+    }
+  } catch(e) { record.status="queued"; }
+  await Store.put("messages",record); updateMessageStatus(record);
+}
 
+async function flushQueuedMessages(){
+  if (!State.convId || !State.peerConnected || !State.sessionKey) return;
+  const convId=State.convId, list=await Store.allByConv(convId);
+  list.sort((a,b)=>a.ts-b.ts);
+  for (const record of list) {
+    if (State.convId!==convId || !State.peerConnected) return;
+    if (record.from==="me" && record.kind==="text" && ["queued","sent"].includes(record.status)) {
+      await transmitTextRecord(record);
+    }
+  }
+}
+
+async function sendMessageAck(messageId, recipientId){
+  if (!State.peerConnected || !State.sessionKey || !State.conn) return;
+  try {
+    const conn=State.conn, aad=State.convId+"|ack|"+State.myId+"|"+messageId;
+    const body=enc.encode(JSON.stringify({messageId:messageId,receiver:recipientId,receivedAt:Date.now()}));
+    const encrypted=await Crypto.encrypt(State.sessionKey,aad,body);
+    if (State.conn===conn && State.peerConnected)
+      conn.send({t:"ack",sender:State.myId,messageId:messageId,iv:encrypted.iv,ct:encrypted.ct});
+  } catch(e) {}
+}
+
+async function handleMessageAck(msg){
+  if (!State.sessionKey || msg.sender!==State.remotePeerId || !msg.messageId) return;
+  const aad=State.convId+"|ack|"+msg.sender+"|"+msg.messageId;
+  const plaintext=await Crypto.decrypt(State.sessionKey,aad,msg.iv,msg.ct);
+  if (plaintext===null) return;
+  let payload; try { payload=JSON.parse(dec.decode(plaintext)); } catch(e) { return; }
+  if (payload.messageId!==msg.messageId || payload.receiver!==State.myId) return;
+  const record=await Store.get("messages",msg.messageId);
+  if (!record || record.from!=="me" || record.convId!==State.convId || record.status==="delivered") return;
+  record.status="delivered"; record.deliveredAt=Number(payload.receivedAt)||Date.now();
+  await Store.put("messages",record); updateMessageStatus(record);
+  await saveConversationPatch(State.convId,{lastActivity:Date.now()});
+}
 
 async function receiveTextMessage(msg){
-
-  if (msg.counter <= State.recvCounter){
-
-    pushSystemLine("Message rejeté (rejeu détecté).", true);
-
-    return;
-
+  if (msg.sender!==State.remotePeerId || !Number.isInteger(msg.counter) || msg.counter<1) {
+    pushSystemLine("Message rejeté : identifiant ou compteur invalide.",true); return;
   }
-
-  const aad = `${State.convId}|${msg.counter}|${msg.sender}|text`;
-
-  const pt = await Crypto.decrypt(State.sessionKey, aad, msg.iv, msg.ct);
-
-  if (pt === null){
-
-    pushSystemLine("Un message n'a pas pu être authentifié et a été rejeté.", true);
-
-    return;
-
-  }
-
-  State.recvCounter = msg.counter;
-
-  const text = dec.decode(pt);
-
-  const id = State.convId + "-peer-" + msg.counter;
-
-  const record = { id, convId: State.convId, from:"peer", kind:"text", text, ts: Date.now(), expiresAt: Date.now()+State.ttlMs, status:"received" };
-
-  await Store.put("messages", record);
-
-  renderMessage(record);
-
+  const expectedId=State.convId+"-"+msg.sender+"-"+msg.counter;
+  if (msg.id!==expectedId) { pushSystemLine("Message rejeté : identifiant incohérent.",true); return; }
+  const existing=await Store.get("messages",msg.id);
+  if (existing) { await sendMessageAck(msg.id,msg.sender); return; }
+  if (msg.counter<=State.recvCounter) { pushSystemLine("Message rejeté (rejeu détecté).",true); return; }
+  const aad=State.convId+"|"+msg.counter+"|"+msg.sender+"|text";
+  const plaintext=await Crypto.decrypt(State.sessionKey,aad,msg.iv,msg.ct);
+  if (plaintext===null) { pushSystemLine("Un message n'a pas pu être authentifié et a été rejeté.",true); return; }
+  State.recvCounter=msg.counter;
+  const content=dec.decode(plaintext), now=Date.now();
+  const record={id:msg.id,convId:State.convId,from:"peer",kind:"text",text:content,sender:msg.sender,
+    counter:msg.counter,ts:now,expiresAt:now+State.ttlMs,status:"received"};
+  await Store.put("messages",record);
+  await saveConversationPatch(State.convId,{recvCounter:State.recvCounter,
+    lastMessage:"Correspondant : "+content.replace(/\s+/g," ").slice(0,120),lastActivity:now,connectionStatus:"connected"});
+  renderMessage(record); await sendMessageAck(record.id,msg.sender);
 }
 
+async function sendEncryptedControl(payload){
+  if (!State.peerConnected || !State.sessionKey || !State.conn || !State.myId) return false;
+  try {
+    const conn=State.conn, nonce=randomId(9), aad=State.convId+"|control|"+State.myId+"|"+nonce;
+    const encrypted=await Crypto.encrypt(State.sessionKey,aad,enc.encode(JSON.stringify(payload)));
+    if (State.conn!==conn || !State.peerConnected) return false;
+    conn.send({t:"control",sender:State.myId,nonce:nonce,iv:encrypted.iv,ct:encrypted.ct});
+    return true;
+  } catch(e) { return false; }
+}
 
+async function handleEncryptedControl(msg){
+  if (!State.sessionKey || msg.sender!==State.remotePeerId || !msg.nonce) return;
+  if (!State.seenControlNonces) State.seenControlNonces=new Set();
+  if (State.seenControlNonces.has(msg.nonce)) return;
+  const aad=State.convId+"|control|"+msg.sender+"|"+msg.nonce;
+  const plaintext=await Crypto.decrypt(State.sessionKey,aad,msg.iv,msg.ct);
+  if (plaintext===null) { pushSystemLine("Commande de contrôle non authentifiée : ignorée.",true); return; }
+  let payload; try { payload=JSON.parse(dec.decode(plaintext)); } catch(e) { return; }
+  State.seenControlNonces.add(msg.nonce);
+  if (payload.type==="clear-history") {
+    await Store.clearConversationMessages(State.convId);
+    await loadHistory();
+    pushSystemLine("Votre correspondant a demandé l'effacement de l'historique local de cette conversation.",false);
+    return;
+  }
+  if (payload.type==="file-received" && payload.transferId) {
+    const list=await Store.allByConv(State.convId);
+    const record=list.find(item=>item.from==="me" && item.transferId===payload.transferId);
+    if (record && record.status!=="delivered") {
+      record.status="delivered"; record.deliveredAt=Date.now();
+      await Store.put("messages",record); updateMessageStatus(record);
+      await saveConversationPatch(State.convId,{lastActivity:Date.now()});
+    }
+  }
+}
 
 /* ======================= ENVOI / RÉCEPTION — FICHIERS (découpés) ======================= */
 
@@ -1693,7 +1725,7 @@ async function sendFile(file, kind){
 
   const record = {
 
-    id, convId: State.convId, from:"me", kind, mime:file.type, ts: Date.now(),
+    id, convId: State.convId, from:"me", kind, mime:file.type, transferId:transferId, ts: Date.now(),
 
     expiresAt: Date.now()+State.ttlMs, status:"sending", progress:0, _localUrl: localUrl
 
@@ -1753,6 +1785,7 @@ async function sendFile(file, kind){
 
   record.progress = 100;
 
+  await Store.put("messages", { ...record, _localUrl: undefined, blob: file });
   updateMessageStatus(record);
 
 }
@@ -1760,94 +1793,50 @@ async function sendFile(file, kind){
 
 
 async function receiveChunk(msg){
-
-  const { transferId, index, total, kind, mime, iv, ct, size } = msg;
-
-  const max = maxForKind(kind);
-
-  if (size > max){ pushSystemLine("Fichier reçu refusé : taille au-delà de la limite autorisée.", true); return; }
-
-
-
-  let t = State.incomingTransfers.get(transferId);
-
-  if (!t){
-
-    if (State.incomingTransfers.size > 4){ pushSystemLine("Trop de transferts simultanés, un envoi a été ignoré.", true); return; }
-
-    t = { chunks: new Array(total).fill(null), total, kind, mime, size, received: 0 };
-
-    State.incomingTransfers.set(transferId, t);
-
+  const {transferId,index,total,kind,mime,iv,ct,size}=msg, max=maxForKind(kind);
+  if (!transferId || !Number.isInteger(size) || size<1 || size>max ||
+      !Number.isInteger(index) || !Number.isInteger(total) || total<1 ||
+      total!==Math.ceil(size/CHUNK_SIZE) || index<0 || index>=total) {
+    pushSystemLine("Fichier reçu refusé : métadonnées invalides ou taille au-delà de la limite.",true); return;
   }
-
-  if (index < 0 || index >= total || t.chunks[index] !== null) return; // doublon ou index invalide ignoré
-
-
-
-  const aad = `${State.convId}|${transferId}|${index}|${total}|${kind}`;
-
-  const pt = await Crypto.decrypt(State.sessionKey, aad, iv, ct);
-
-  if (pt === null){
-
-    pushSystemLine("Un fragment de fichier n'a pas pu être authentifié ; transfert abandonné.", true);
-
+  let transfer=State.incomingTransfers.get(transferId);
+  if (!transfer) {
+    if (State.incomingTransfers.size>=4) { pushSystemLine("Trop de transferts simultanés, un envoi a été ignoré.",true); return; }
+    transfer={chunks:new Array(total).fill(null),total:total,kind:kind,mime:mime,size:size,received:0};
+    State.incomingTransfers.set(transferId,transfer);
+  }
+  if (transfer.total!==total || transfer.size!==size || transfer.kind!==kind) {
     State.incomingTransfers.delete(transferId);
-
-    return;
-
+    pushSystemLine("Transfert interrompu : les métadonnées des fragments ne correspondent pas.",true); return;
   }
-
-  t.chunks[index] = pt;
-
-  t.received++;
-
-  updateProgress(State.convId + "-recv-" + transferId, Math.round(t.received/t.total*100), true, t);
-
-
-
-  if (t.received === t.total){
-
-    const totalLen = t.chunks.reduce((n,c)=>n+c.byteLength,0);
-
-    if (totalLen > max){
-
-      pushSystemLine("Fichier reçu refusé après réassemblage : taille invalide.", true);
-
-      State.incomingTransfers.delete(transferId);
-
-      return;
-
+  if (transfer.chunks[index]!==null) return;
+  const aad=State.convId+"|"+transferId+"|"+index+"|"+total+"|"+kind;
+  const plaintext=await Crypto.decrypt(State.sessionKey,aad,iv,ct);
+  if (plaintext===null) {
+    pushSystemLine("Un fragment de fichier n'a pas pu être authentifié ; transfert abandonné.",true);
+    State.incomingTransfers.delete(transferId); removePendingBubble(State.convId+"-recv-"+transferId); return;
+  }
+  transfer.chunks[index]=plaintext; transfer.received++;
+  updateProgress(State.convId+"-recv-"+transferId,Math.round(transfer.received/transfer.total*100),true,transfer);
+  if (transfer.received===transfer.total) {
+    const totalLen=transfer.chunks.reduce((sum,part)=>sum+part.byteLength,0);
+    if (totalLen!==size || totalLen>max) {
+      pushSystemLine("Fichier reçu refusé : la taille reconstituée est incorrecte.",true);
+      State.incomingTransfers.delete(transferId); removePendingBubble(State.convId+"-recv-"+transferId); return;
     }
-
-    const full = new Uint8Array(totalLen);
-
-    let off = 0;
-
-    for (const c of t.chunks){ full.set(c, off); off += c.byteLength; }
-
-    const blob = new Blob([full], { type: t.mime || "application/octet-stream" });
-
+    const full=new Uint8Array(totalLen); let offset=0;
+    for (const part of transfer.chunks) { full.set(part,offset); offset+=part.byteLength; }
+    const blob=new Blob([full],{type:transfer.mime||"application/octet-stream"});
     State.incomingTransfers.delete(transferId);
-
-
-
-    const id = State.convId + "-peer-f-" + transferId;
-
-    const record = { id, convId: State.convId, from:"peer", kind:t.kind, mime:t.mime, ts: Date.now(), expiresAt: Date.now()+State.ttlMs, status:"received", blob };
-
-    await Store.put("messages", record);
-
-    removePendingBubble(State.convId + "-recv-" + transferId);
-
-    renderMessage(record);
-
+    const id=State.convId+"-peer-f-"+transferId, now=Date.now();
+    const record={id:id,convId:State.convId,from:"peer",kind:transfer.kind,mime:transfer.mime,transferId:transferId,
+      ts:now,expiresAt:now+State.ttlMs,status:"received",blob:blob};
+    await Store.put("messages",record);
+    await saveConversationPatch(State.convId,{lastMessage:transfer.kind==="image"?"Photo reçue":transfer.kind==="video"?"Vidéo reçue":"Message vocal reçu",lastActivity:now});
+    removePendingBubble(State.convId+"-recv-"+transferId); renderMessage(record);
+    await sendEncryptedControl({type:"file-received",transferId:transferId});
   }
-
 }
-
-
 
 /* ======================= MESSAGES VOCAUX ======================= */
 
@@ -2041,7 +2030,7 @@ function renderMessage(record){
 
   meta.className = "meta-line";
 
-  const statusLabel = record.status === "sending" ? "Envoi…" : record.status === "failed" ? "Échec" : record.status === "sent" ? "Envoyé" : "";
+  const statusLabel = record.status === "queued" ? "En attente" : record.status === "sending" ? "Envoi…" : record.status === "failed" ? "Échec" : record.status === "sent" ? "Envoyé · attente de confirmation" : record.status === "delivered" ? "Distribué ✓" : "";
 
   meta.innerHTML = `<span>${fmtTime(record.ts)}</span>` + (statusLabel ? ` <span class="${record.status==='failed'?'fail':''}">${statusLabel}</span>` : "");
 
@@ -2137,7 +2126,7 @@ function updateMessageStatus(record){
 
   if (meta){
 
-    const statusLabel = record.status === "sending" ? "Envoi…" : record.status === "failed" ? "Échec" : "Envoyé";
+    const statusLabel = record.status === "queued" ? "En attente" : record.status === "sending" ? "Envoi…" : record.status === "failed" ? "Échec" : record.status === "delivered" ? "Distribué ✓" : "Envoyé · attente de confirmation";
 
     meta.innerHTML = `<span>${fmtTime(record.ts)}</span> <span class="${record.status==='failed'?'fail':''}">${statusLabel}</span>`;
 
