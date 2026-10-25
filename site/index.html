@@ -1132,7 +1132,10 @@ async function resumeConversation(convId){
     return;
   }
   if (State.convId === convId && State.peer) {
-    showScreen(State.role === "creator" && !State.peerConnected ? "inviteScreen" : "chatScreen");
+    showScreen("chatScreen");
+    updateChatStatus(State.peerConnected ? "connected" : "disconnected",
+      State.peerConnected ? "Connecté · canal chiffré" : "Hors ligne · messages en attente");
+    await loadHistory();
     return;
   }
 
