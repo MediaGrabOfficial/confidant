@@ -1498,7 +1498,7 @@ function explainPeerError(err){
 
   if (type === "disconnected") return "Connexion au service de signalisation interrompue.";
 
-  return "Connexion impossible : " + (type || "erreur inconnue") + ". Certains réseaux (écoles, entreprises) bloquent les connexions directes ; sans serveur de relais (TURN), la connexion peut échouer.";
+  return "Connexion impossible. Vérifiez votre connexion Internet puis réessayez.";
 
 }
 
