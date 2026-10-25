@@ -1001,13 +1001,6 @@ function saveConversationPatch(convId, patch){
   return pending;
 }
 
-function buildInviteLinkForConversation(conv){
-  const url = new URL(location.href);
-  url.hash = "id=" + encodeURIComponent(conv.localPeerId || conv.peerId) +
-    "&pub=" + encodeURIComponent(conv.myPubB64) +
-    "&cv=" + encodeURIComponent(conv.id);
-  return url.toString();
-}
 
 async function refreshConversationList(){
   const list = $("conversationList");
@@ -1062,12 +1055,10 @@ async function refreshConversationList(){
       const invite = document.createElement("button");
       invite.type = "button";
       invite.className = "conversation-tool";
-      invite.textContent = "Copier lien";
+      invite.textContent = "Ouvrir l'invitation";
       invite.addEventListener("click", async (event) => {
         event.stopPropagation();
-        const link = buildInviteLinkForConversation(conv);
-        try { await navigator.clipboard.writeText(link); invite.textContent = "Copié"; }
-        catch (e) { prompt("Copiez ce lien d'invitation", link); }
+        await resumeConversation(conv.id);
       });
       tools.appendChild(invite);
     }
