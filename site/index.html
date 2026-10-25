@@ -941,6 +941,8 @@ const State = {
 
   convId: null,
 
+  conversationName: "Conversation privée",
+
   role: null,            // 'creator' | 'joiner'
 
   keyPair: null,
@@ -1009,6 +1011,10 @@ function saveConversationPatch(convId, patch){
     const conv = await Store.get("conversations", convId);
     if (!conv) return null;
     Object.assign(conv, patch);
+    if (State.convId === convId && patch.name) {
+      State.conversationName = conv.name;
+      $("chatTitle").textContent = conv.name;
+    }
     await Store.put("conversations", conv);
     await refreshConversationList();
     return conv;
@@ -1133,6 +1139,9 @@ async function resumeConversation(convId){
   teardownActiveSession();
   State.convId = conv.id;
   State.role = conv.role;
+  State.conversationName = conv.name || "Conversation privée";
+  $("chatTitle").textContent = State.conversationName;
+  $("btnChatInvite").classList.toggle("hidden", State.role !== "creator");
   State.myId = conv.localPeerId || conv.peerId || null;
   State.remotePeerId = conv.remotePeerId || null;
   State.myPubB64 = conv.myPubB64 || null;
@@ -1156,12 +1165,13 @@ async function resumeConversation(convId){
     return;
   }
 
+  showScreen("chatScreen");
+  updateChatStatus("disconnected", "Hors ligne · messages en attente");
   if (State.role === "creator") {
-    showScreen("inviteScreen");
-    $("inviteError").classList.add("hidden");
-    setInviteStatus("waiting", "Réouverture de l'invitation…");
+    $("inviteLinkBox").textContent = buildInviteLink();
+    $("btnShareInvite").classList.toggle("hidden", !navigator.share);
+    setInviteStatus("waiting", "Invitation prête à partager");
   } else {
-    showScreen("chatScreen");
     updateChatStatus("connecting", "Connexion en cours…");
   }
   startPeerForActiveConversation(true);
@@ -1178,7 +1188,7 @@ function startPeerForActiveConversation(isResume){
       $("inviteLinkBox").textContent = buildInviteLink();
       $("btnShareInvite").classList.toggle("hidden", !navigator.share);
       setInviteStatus("waiting", "En attente du destinataire…");
-      if ($("chatScreen").classList.contains("hidden")) showScreen("inviteScreen");
+      if (!isResume) showScreen("inviteScreen");
       await saveConversationPatch(boundConvId, {connectionStatus:"waiting", lastActivity:Date.now()});
     } else {
       if (!State.remotePeerId) {
@@ -1271,12 +1281,18 @@ function makePeer(id){
 /* ---------- Création d'une conversation ---------- */
 
 async function createConversation(){
+  const chosenName = prompt("Nom de la conversation", "Conversation privée");
+  if (chosenName === null) return;
+  const conversationName = chosenName.trim().slice(0,64) || "Conversation privée";
   teardownActiveSession();
   showScreen("inviteScreen");
   $("inviteError").classList.add("hidden");
   setInviteStatus("connecting", "Génération des clés…");
 
   State.role = "creator";
+  State.conversationName = conversationName;
+  $("chatTitle").textContent = conversationName;
+  $("btnChatInvite").classList.remove("hidden");
   State.convId = randomId(12);
   State.keyPair = await Crypto.genKeyPair();
   State.myPubB64 = await Crypto.exportPub(State.keyPair.publicKey);
@@ -1296,7 +1312,7 @@ async function createConversation(){
       remotePeerId:null, privateKey:State.keyPair.privateKey, publicKey:State.keyPair.publicKey,
       myPubB64:State.myPubB64, theirPubB64:null, ttlMs:State.ttlMs,
       createdAt:now, lastActivity:now, lastMessage:"Invitation créée", connectionStatus:"waiting",
-      sendCounter:0, recvCounter:-1, name:"Nouvelle conversation"
+      sendCounter:0, recvCounter:-1, name:conversationName
     });
   } catch (e) {
     showInviteError("Ce navigateur n'a pas pu conserver les clés de reprise dans IndexedDB.");
@@ -1312,10 +1328,27 @@ function buildInviteLink(){
 
   const url = new URL(location.href);
 
-  url.hash = `id=${encodeURIComponent(State.myId)}&pub=${encodeURIComponent(State.myPubB64)}&cv=${encodeURIComponent(State.convId)}`;
+  url.hash = `id=${encodeURIComponent(State.myId)}&pub=${encodeURIComponent(State.myPubB64)}&cv=${encodeURIComponent(State.convId)}&name=${encodeURIComponent(State.conversationName || "Conversation privée")}`;
 
   return url.toString();
 
+}
+
+function buildQrInviteLink(){
+  const inviteLink = new URL(buildInviteLink());
+  const params = new URLSearchParams(inviteLink.hash.replace(/^#/, ""));
+  inviteLink.hash = "";
+  inviteLink.search = params.toString();
+  const fallback = inviteLink.toString();
+  return "intent://" + inviteLink.host + inviteLink.pathname + inviteLink.search +
+    "#Intent;scheme=https;package=fr.confidant.app;S.browser_fallback_url=" +
+    encodeURIComponent(fallback) + ";end";
+}
+
+function normalizeInviteLink(value){
+  let link = String(value || "").trim();
+  if (/^intent:\/\//i.test(link)) link = link.replace(/^intent:/i, "https:").split("#Intent;")[0];
+  return link;
 }
 
 function setInviteStatus(kind, text){
@@ -1350,8 +1383,9 @@ async function joinFromLink(link){
 
   let url, hash;
   try {
-    url = new URL(link.trim());
+    url = new URL(normalizeInviteLink(link));
     hash = new URLSearchParams(url.hash.replace(/^#/, ""));
+    if (!hash.has("id")) hash = url.searchParams;
   } catch (e) {
     showJoinError("Ce lien n'est pas valide.");
     return;
@@ -1360,6 +1394,7 @@ async function joinFromLink(link){
   const peerId = hash.get("id");
   const theirPubB64 = hash.get("pub");
   const convId = hash.get("cv");
+  const inviteName = (hash.get("name") || "Conversation privée").trim().slice(0,64) || "Conversation privée";
   if (!peerId || !theirPubB64 || !convId ||
       !/^[-A-Za-z0-9_]+$/.test(peerId) || !/^[-A-Za-z0-9_]+$/.test(convId)) {
     showJoinError("Invitation incomplète ou invalide.");
@@ -1399,14 +1434,22 @@ async function joinFromLink(link){
       remotePeerId:peerId, privateKey:State.keyPair.privateKey, publicKey:State.keyPair.publicKey,
       myPubB64:State.myPubB64, theirPubB64:State.theirPubB64, ttlMs:State.ttlMs,
       createdAt:now, lastActivity:now, lastMessage:"Invitation acceptée", connectionStatus:"connecting",
-      sendCounter:0, recvCounter:-1, name:"Nouvelle conversation"
+      sendCounter:0, recvCounter:-1, name:inviteName
     });
   } catch (e) {
     showJoinError("Ce navigateur n'a pas pu conserver les clés de reprise dans IndexedDB.");
     return;
   }
 
-  try { history.replaceState(null, "", url.pathname + url.search); } catch (e) {}
+  State.conversationName = inviteName;
+  $("chatTitle").textContent = inviteName;
+  $("btnChatInvite").classList.add("hidden");
+  try {
+    const cleanUrl = new URL(url.href);
+    cleanUrl.hash = "";
+    ["id","pub","cv","name"].forEach(k => cleanUrl.searchParams.delete(k));
+    history.replaceState(null, "", cleanUrl.pathname + cleanUrl.search);
+  } catch (e) {}
   setLastConversation(State.convId);
   await refreshConversationList();
   setJoinStatus("connecting", "Connexion au service de signalisation…");
