@@ -10,6 +10,7 @@ const checks = [
   ["AES-GCM is present", html.includes('name:"AES-GCM"')],
   ["IndexedDB local storage is present", html.includes('indexedDB.open(DB_NAME, DB_VERSION)')],
   ["Conversation list is wired", html.includes('id="conversationList"') && html.includes("function refreshConversationList()")],
+  ["Invite screen can open local history", html.includes('id="btnViewHistory"') && html.includes('await loadHistory();')],
   ["Identity/key persistence is present", html.includes("privateKey:State.keyPair.privateKey") && html.includes("localPeerId:State.myId")],
   ["Text queue is present", html.includes('status:"queued"') && html.includes("async function flushQueuedMessages()")],
   ["Delivery ACK handler is present", html.includes("async function handleMessageAck(msg)") && html.includes('msg.t === "ack"')],

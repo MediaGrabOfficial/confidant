@@ -375,6 +375,7 @@
 
       <div id="inviteError" class="err-box hidden"></div>
 
+      <button class="btn btn-ghost" id="btnViewHistory" style="border:1px solid var(--border);">Voir l'historique</button>
       <button class="btn btn-ghost" id="btnCancelInvite" style="border:1px solid var(--border);">Annuler</button>
 
     </div>
@@ -1169,7 +1170,7 @@ function startPeerForActiveConversation(isResume){
       $("inviteLinkBox").textContent = buildInviteLink();
       $("btnShareInvite").classList.toggle("hidden", !navigator.share);
       setInviteStatus("waiting", "En attente du destinataire…");
-      showScreen("inviteScreen");
+      if ($("chatScreen").classList.contains("hidden")) showScreen("inviteScreen");
       await saveConversationPatch(boundConvId, {connectionStatus:"waiting", lastActivity:Date.now()});
     } else {
       if (!State.remotePeerId) {
@@ -2220,6 +2221,12 @@ $("btnJoin").addEventListener("click", () => {
   if (value) joinFromLink(value);
 });
 $("btnCancelInvite").addEventListener("click", exitToList);
+$("btnViewHistory").addEventListener("click", async () => {
+  showScreen("chatScreen");
+  updateChatStatus(State.peerConnected ? "connected" : "disconnected",
+    State.peerConnected ? "Connecté · canal chiffré" : "Hors ligne · messages texte en attente");
+  await loadHistory();
+});
 $("btnCancelJoin").addEventListener("click", exitToList);
 $("btnBackList").addEventListener("click", exitToList);
 
