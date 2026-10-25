@@ -2,13 +2,20 @@ package fr.confidant.app;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.ActivityNotFoundException;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
+import android.view.WindowManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -18,19 +25,28 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Toast;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.Set;
+
 public final class MainActivity extends Activity {
     private static final String APP_HOST = "mediagrabofficial.github.io";
     private static final String APP_PATH = "/confidant";
-    private static final int REQ_AUDIO = 2101;
+    private static final String NOTIFICATION_CHANNEL = "confidant-messages";
+    private static final int REQ_MEDIA = 2101;
     private static final int REQ_FILES = 2102;
+    private static final int REQ_NOTIFICATIONS = 2103;
 
     private WebView webView;
     private PermissionRequest pendingWebPermission;
+    private String[] pendingWebResources;
     private ValueCallback<Uri[]> pendingFileChooser;
+    private int nextNotificationId = 1;
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         getWindow().setStatusBarColor(android.graphics.Color.rgb(234, 231, 223));
         getWindow().setNavigationBarColor(android.graphics.Color.rgb(234, 231, 223));
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -54,13 +70,7 @@ public final class MainActivity extends Activity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
-                String scheme = uri.getScheme() == null ? "" : uri.getScheme();
-                String host = uri.getHost() == null ? "" : uri.getHost();
-                String path = uri.getPath() == null ? "" : uri.getPath();
-                boolean internalPage = "https".equalsIgnoreCase(scheme)
-                        && APP_HOST.equalsIgnoreCase(host)
-                        && (path.equals(APP_PATH) || path.startsWith(APP_PATH + "/"));
-                if (internalPage) return false;
+                if (isInternalAppUrl(uri)) return false;
                 return openExternal(uri);
             }
         });
@@ -73,7 +83,10 @@ public final class MainActivity extends Activity {
 
             @Override
             public void onPermissionRequestCanceled(PermissionRequest request) {
-                if (pendingWebPermission == request) pendingWebPermission = null;
+                if (pendingWebPermission == request) {
+                    pendingWebPermission = null;
+                    pendingWebResources = null;
+                }
             }
 
             @Override
@@ -81,9 +94,14 @@ public final class MainActivity extends Activity {
                     FileChooserParams params) {
                 if (pendingFileChooser != null) pendingFileChooser.onReceiveValue(null);
                 pendingFileChooser = callback;
-                Intent pick = new Intent(Intent.ACTION_GET_CONTENT);
-                pick.addCategory(Intent.CATEGORY_OPENABLE);
-                pick.setType("*/*");
+                Intent pick;
+                try {
+                    pick = params.createIntent();
+                } catch (RuntimeException e) {
+                    pick = new Intent(Intent.ACTION_GET_CONTENT);
+                    pick.addCategory(Intent.CATEGORY_OPENABLE);
+                    pick.setType("*/*");
+                }
                 try {
                     startActivityForResult(pick, REQ_FILES);
                     return true;
@@ -96,9 +114,37 @@ public final class MainActivity extends Activity {
             }
         });
 
+        webView.addJavascriptInterface(new ConfidantBridge(), "ConfidantAndroid");
         setContentView(webView);
-        if (state == null) webView.loadUrl("https://" + APP_HOST + APP_PATH + "/");
-        else webView.restoreState(state);
+        if (state != null) {
+            webView.restoreState(state);
+        } else {
+            String startUrl = internalAppUrl(getIntent() == null ? null : getIntent().getData());
+            webView.loadUrl(startUrl == null ? "https://" + APP_HOST + APP_PATH + "/" : startUrl);
+        }
+    }
+
+    private boolean isInternalAppUrl(Uri uri) {
+        return internalAppUrl(uri) != null;
+    }
+
+    private String internalAppUrl(Uri uri) {
+        if (uri == null) return null;
+        String scheme = uri.getScheme() == null ? "" : uri.getScheme();
+        String host = uri.getHost() == null ? "" : uri.getHost();
+        String path = uri.getPath() == null ? "" : uri.getPath();
+        boolean allowed = "https".equalsIgnoreCase(scheme)
+                && APP_HOST.equalsIgnoreCase(host)
+                && (path.equals(APP_PATH) || path.startsWith(APP_PATH + "/"));
+        return allowed ? uri.toString() : null;
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        String inviteUrl = internalAppUrl(intent == null ? null : intent.getData());
+        if (webView != null && inviteUrl != null) webView.loadUrl(inviteUrl);
     }
 
     private void handleWebPermission(PermissionRequest request) {
@@ -108,39 +154,122 @@ public final class MainActivity extends Activity {
             request.deny();
             return;
         }
-        boolean audio = false;
-        for (String resource : request.getResources()) {
-            if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) audio = true;
-            else {
+
+        Set<String> androidPermissions = new LinkedHashSet<>();
+        String[] resources = request.getResources();
+        for (String resource : resources) {
+            if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) {
+                androidPermissions.add(Manifest.permission.RECORD_AUDIO);
+            } else if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resource)) {
+                androidPermissions.add(Manifest.permission.CAMERA);
+            } else {
                 request.deny();
                 return;
             }
         }
-        if (!audio) {
+        if (resources.length == 0 || androidPermissions.isEmpty()) {
             request.deny();
             return;
         }
-        if (Build.VERSION.SDK_INT < 23 ||
-                checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-            request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
-        } else {
-            if (pendingWebPermission != null) pendingWebPermission.deny();
-            pendingWebPermission = request;
-            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_AUDIO);
+
+        ArrayList<String> missing = new ArrayList<>();
+        if (Build.VERSION.SDK_INT >= 23) {
+            for (String permission : androidPermissions) {
+                if (checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED) missing.add(permission);
+            }
         }
+        if (missing.isEmpty()) {
+            request.grant(resources);
+            return;
+        }
+
+        if (pendingWebPermission != null) pendingWebPermission.deny();
+        pendingWebPermission = request;
+        pendingWebResources = resources.clone();
+        String[] permissionsToRequest = missing.toArray(new String[0]);
+        requestPermissions(permissionsToRequest, REQ_MEDIA);
+    }
+
+    public final class ConfidantBridge {
+        @JavascriptInterface
+        public void requestNotifications() {
+            runOnUiThread(() -> {
+                if (Build.VERSION.SDK_INT >= 33
+                        && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIFICATIONS);
+                } else {
+                    Toast.makeText(MainActivity.this, "Notifications activées.", Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void notifyMessage(String title, String body) {
+            final String safeTitle = safeText(title, "Confidant", 64);
+            final String safeBody = safeText(body, "Nouveau message", 180);
+            runOnUiThread(() -> postMessageNotification(safeTitle, safeBody));
+        }
+    }
+
+    private String safeText(String value, String fallback, int maxLength) {
+        if (value == null || value.trim().isEmpty()) return fallback;
+        String compact = value.replace('\n', ' ').replace('\r', ' ').trim();
+        return compact.length() > maxLength ? compact.substring(0, maxLength) : compact;
+    }
+
+    private void postMessageNotification(String title, String body) {
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+        NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (manager == null) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(
+                    NOTIFICATION_CHANNEL, "Messages Confidant", NotificationManager.IMPORTANCE_DEFAULT);
+            channel.setDescription("Notifications de nouveaux messages Confidant");
+            manager.createNotificationChannel(channel);
+        }
+        Intent launch = new Intent(this, MainActivity.class);
+        launch.setAction(Intent.ACTION_MAIN);
+        launch.addCategory(Intent.CATEGORY_LAUNCHER);
+        launch.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent pending = PendingIntent.getActivity(this, 0, launch,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                ? new Notification.Builder(this, NOTIFICATION_CHANNEL)
+                : new Notification.Builder(this);
+        Notification notification = builder
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setContentIntent(pending)
+                .setAutoCancel(true)
+                .build();
+        manager.notify(nextNotificationId++, notification);
     }
 
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(requestCode, permissions, results);
-        if (requestCode == REQ_AUDIO && pendingWebPermission != null) {
+        if (requestCode == REQ_MEDIA && pendingWebPermission != null) {
             PermissionRequest request = pendingWebPermission;
+            String[] resources = pendingWebResources;
             pendingWebPermission = null;
-            if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
-                request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+            pendingWebResources = null;
+            boolean granted = results.length > 0;
+            for (int result : results) granted &= result == PackageManager.PERMISSION_GRANTED;
+            if (granted && resources != null) {
+                request.grant(resources);
             } else {
                 request.deny();
-                Toast.makeText(this, "Le microphone n’a pas été autorisé.", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "L’accès caméra ou microphone n’a pas été autorisé.", Toast.LENGTH_SHORT).show();
+            }
+        } else if (requestCode == REQ_NOTIFICATIONS) {
+            if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(this, "Notifications activées.", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "Les notifications restent désactivées.", Toast.LENGTH_SHORT).show();
             }
         }
     }
@@ -192,6 +321,7 @@ public final class MainActivity extends Activity {
             webView.stopLoading();
             webView.setWebChromeClient(null);
             webView.setWebViewClient(null);
+            webView.removeJavascriptInterface("ConfidantAndroid");
             webView.destroy();
             webView = null;
         }
