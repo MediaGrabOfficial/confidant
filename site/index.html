@@ -271,6 +271,20 @@
 
   .limits-note{ font-size:11px; color:var(--text-2); margin-top:18px; line-height:1.6; }
 
+
+  .saved-conversations{margin:4px 0 6px;}
+  .section-kicker{font-size:10px;letter-spacing:.12em;color:var(--text-2);font-weight:650;margin:4px 0 10px;}
+  .conversation-list{display:flex;flex-direction:column;gap:7px;}
+  .conversation-card{display:flex;align-items:stretch;gap:4px;border:1px solid var(--border);background:var(--surface);border-radius:var(--radius);min-width:0;}
+  .conversation-open{flex:1;min-width:0;text-align:left;padding:12px 13px;display:block;}
+  .conversation-name{font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .conversation-preview{font-size:12px;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:3px;}
+  .conversation-meta{display:flex;gap:8px;align-items:center;color:var(--text-2);font-size:10px;margin-top:5px;}
+  .conversation-tools{display:flex;flex-direction:column;justify-content:center;gap:2px;padding:4px;}
+  .conversation-tool{font-size:10px;color:var(--olive);padding:5px 7px;}
+  .conversation-empty{padding:12px 0;color:var(--text-2);font-size:12px;}
+  .chat-header-left{flex:1;min-width:0;}
+  .chat-back{font-size:22px;padding:6px 10px;margin-right:4px;}
 </style>
 
 </head>
@@ -299,6 +313,12 @@
 
         <button class="btn btn-primary" id="btnCreate">Créer une conversation</button>
 
+      </div>
+
+      <div class="saved-conversations">
+        <div class="section-kicker">MES CONVERSATIONS</div>
+        <div id="conversationList" class="conversation-list"></div>
+        <div id="conversationEmpty" class="conversation-empty">Vos conversations enregistrées apparaîtront ici.</div>
       </div>
 
       <div class="join-row">
@@ -393,6 +413,7 @@
 
     <div class="chat-header">
 
+      <button class="icon-btn chat-back" id="btnBackList" aria-label="Retour à mes conversations">‹</button>
       <div class="chat-header-left">
 
         <div class="chat-title">Conversation privée</div>
@@ -819,6 +840,15 @@ const Store = {
 
   },
 
+  async allConversations(){
+    const s = await this.tx("conversations", "readonly");
+    return new Promise((resolve, reject) => {
+      const r = s.getAll();
+      r.onsuccess = () => resolve(r.result || []);
+      r.onerror = () => reject(r.error);
+    });
+  },
+
   async delete(store, key){
 
     const s = await this.tx(store, "readwrite");
@@ -909,7 +939,13 @@ const State = {
 
   myId: null,
 
+  remotePeerId: null,
+
   peerConnected: false,
+
+  reconnectTimer: null,
+
+  reconnectAttempts: 0,
 
   sendCounter: 0,
 
@@ -939,6 +975,275 @@ function showScreen(id){
 
 /* ======================= DÉMARRAGE PEERJS ======================= */
 
+let conversationSaveQueue = Promise.resolve();
+
+function setLastConversation(id){
+  try {
+    if (id) localStorage.setItem("confidant.lastConversation", id);
+    else localStorage.removeItem("confidant.lastConversation");
+  } catch (e) {}
+}
+
+function saveConversationPatch(convId, patch){
+  const work = async () => {
+    const conv = await Store.get("conversations", convId);
+    if (!conv) return null;
+    Object.assign(conv, patch);
+    await Store.put("conversations", conv);
+    await refreshConversationList();
+    return conv;
+  };
+  const pending = conversationSaveQueue.then(work, work);
+  conversationSaveQueue = pending.catch(() => {});
+  return pending;
+}
+
+function buildInviteLinkForConversation(conv){
+  const url = new URL(location.href);
+  url.hash = "id=" + encodeURIComponent(conv.localPeerId || conv.peerId) +
+    "&pub=" + encodeURIComponent(conv.myPubB64) +
+    "&cv=" + encodeURIComponent(conv.id);
+  return url.toString();
+}
+
+async function refreshConversationList(){
+  const list = $("conversationList");
+  const empty = $("conversationEmpty");
+  if (!list || !empty) return;
+  const conversations = await Store.allConversations();
+  conversations.sort((a,b) => (b.lastActivity || b.createdAt || 0) - (a.lastActivity || a.createdAt || 0));
+  list.innerHTML = "";
+  empty.classList.toggle("hidden", conversations.length > 0);
+
+  for (const conv of conversations) {
+    const card = document.createElement("div");
+    card.className = "conversation-card";
+
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "conversation-open";
+    const title = document.createElement("div");
+    title.className = "conversation-name";
+    title.textContent = conv.name || "Conversation";
+    const preview = document.createElement("div");
+    preview.className = "conversation-preview";
+    preview.textContent = conv.lastMessage || (conv.role === "creator" ? "Invitation prête à partager" : "Conversation enregistrée");
+    const meta = document.createElement("div");
+    meta.className = "conversation-meta";
+    const status = document.createElement("span");
+    status.textContent = conv.id === State.convId && State.peerConnected ? "Connecté" :
+      (conv.connectionStatus === "waiting" && conv.role === "creator" ? "En attente" : "Enregistré localement");
+    const date = document.createElement("span");
+    date.textContent = fmtTime(conv.lastActivity || conv.createdAt || Date.now());
+    meta.append(status, date);
+    open.append(title, preview, meta);
+    open.addEventListener("click", () => resumeConversation(conv.id));
+    card.appendChild(open);
+
+    const tools = document.createElement("div");
+    tools.className = "conversation-tools";
+
+    const rename = document.createElement("button");
+    rename.type = "button";
+    rename.className = "conversation-tool";
+    rename.textContent = "Renommer";
+    rename.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const value = prompt("Nom de cette conversation", conv.name || "");
+      if (value === null || !value.trim()) return;
+      await saveConversationPatch(conv.id, {name:value.trim().slice(0,64)});
+    });
+    tools.appendChild(rename);
+
+    if (conv.role === "creator" && conv.myPubB64) {
+      const invite = document.createElement("button");
+      invite.type = "button";
+      invite.className = "conversation-tool";
+      invite.textContent = "Copier lien";
+      invite.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        const link = buildInviteLinkForConversation(conv);
+        try { await navigator.clipboard.writeText(link); invite.textContent = "Copié"; }
+        catch (e) { prompt("Copiez ce lien d'invitation", link); }
+      });
+      tools.appendChild(invite);
+    }
+    card.appendChild(tools);
+    list.appendChild(card);
+  }
+}
+
+function teardownActiveSession(){
+  if (State.reconnectTimer) clearTimeout(State.reconnectTimer);
+  State.reconnectTimer = null;
+  State.reconnectAttempts = 0;
+  const conn = State.conn;
+  const peer = State.peer;
+  State.conn = null;
+  State.peer = null;
+  State.sessionKey = null;
+  State.peerConnected = false;
+  if (conn) { try { conn.close(); } catch (e) {} }
+  if (peer) { try { peer.destroy(); } catch (e) {} }
+}
+
+async function exitToList(){
+  const previousId = State.convId;
+  if (previousId) {
+    try { await saveConversationPatch(previousId, {connectionStatus:"offline", lastActivity:Date.now()}); } catch (e) {}
+  }
+  teardownActiveSession();
+  setLastConversation(null);
+  State.convId = null;
+  State.role = null;
+  State.keyPair = null;
+  State.myPubB64 = null;
+  State.theirPubB64 = null;
+  State.myId = null;
+  State.remotePeerId = null;
+  State.sendCounter = 0;
+  State.recvCounter = -1;
+  showScreen("homeScreen");
+  await refreshConversationList();
+}
+
+async function resumeConversation(convId){
+  const conv = await Store.get("conversations", convId);
+  if (!conv) {
+    showScreen("homeScreen");
+    await refreshConversationList();
+    return;
+  }
+  if (State.convId === convId && State.peer) {
+    showScreen(State.role === "creator" && !State.peerConnected ? "inviteScreen" : "chatScreen");
+    return;
+  }
+
+  teardownActiveSession();
+  State.convId = conv.id;
+  State.role = conv.role;
+  State.myId = conv.localPeerId || conv.peerId || null;
+  State.remotePeerId = conv.remotePeerId || null;
+  State.myPubB64 = conv.myPubB64 || null;
+  State.theirPubB64 = conv.theirPubB64 || null;
+  State.keyPair = conv.privateKey && conv.publicKey ? {privateKey:conv.privateKey, publicKey:conv.publicKey} : null;
+  State.ttlMs = Number(conv.ttlMs) || 30*24*3600*1000;
+  State.sendCounter = Number(conv.sendCounter) || 0;
+  State.recvCounter = Number.isInteger(conv.recvCounter) ? conv.recvCounter : -1;
+  State.incomingTransfers = new Map();
+  State.sessionKey = null;
+  State.peerConnected = false;
+  $("ttlSelect").value = String(State.ttlMs);
+  setLastConversation(conv.id);
+  await loadHistory();
+
+  if (!State.keyPair || !State.myPubB64 || !State.myId ||
+      (State.role === "joiner" && !State.remotePeerId)) {
+    showScreen("chatScreen");
+    updateChatStatus("error", "Reprise impossible");
+    pushSystemLine("Cette ancienne conversation ne contient pas toutes les informations de reprise. Son historique local reste consultable, mais la session ne peut pas être restaurée.", true);
+    return;
+  }
+
+  if (State.role === "creator") {
+    showScreen("inviteScreen");
+    $("inviteError").classList.add("hidden");
+    setInviteStatus("waiting", "Réouverture de l'invitation…");
+  } else {
+    showScreen("chatScreen");
+    updateChatStatus("connecting", "Connexion en cours…");
+  }
+  startPeerForActiveConversation(true);
+}
+
+function startPeerForActiveConversation(isResume){
+  const boundConvId = State.convId;
+  const peer = makePeer(State.myId);
+  State.peer = peer;
+
+  peer.on("open", async () => {
+    if (State.convId !== boundConvId || State.peer !== peer) return;
+    if (State.role === "creator") {
+      $("inviteLinkBox").textContent = buildInviteLink();
+      $("btnShareInvite").classList.toggle("hidden", !navigator.share);
+      setInviteStatus("waiting", "En attente du destinataire…");
+      showScreen("inviteScreen");
+      await saveConversationPatch(boundConvId, {connectionStatus:"waiting", lastActivity:Date.now()});
+    } else {
+      if (!State.remotePeerId) {
+        if (isResume) {
+          updateChatStatus("error", "Identifiant distant manquant");
+          pushSystemLine("L'identifiant PeerJS du correspondant manque pour cette reprise.", true);
+        } else showJoinError("L'invitation ne contient pas d'identifiant distant valide.");
+        return;
+      }
+      if (isResume) {
+        showScreen("chatScreen");
+        updateChatStatus("connecting", "Connexion en cours…");
+      }
+      const conn = peer.connect(State.remotePeerId, {reliable:true});
+      State.conn = conn;
+      wireConnection(conn, false);
+    }
+  });
+
+  peer.on("connection", (conn) => {
+    if (State.convId !== boundConvId || State.peer !== peer || State.role !== "creator" ||
+        (State.conn && State.conn.open)) {
+      try { conn.close(); } catch (e) {}
+      return;
+    }
+    State.conn = conn;
+    setInviteStatus("connecting", "Connexion en cours…");
+    wireConnection(conn, true);
+  });
+
+  peer.on("error", (err) => {
+    if (State.convId !== boundConvId || State.peer !== peer) return;
+    const message = explainPeerError(err);
+    if (State.role === "creator") showInviteError(message);
+    else if (isResume) {
+      updateChatStatus("error", "Connexion impossible");
+      pushSystemLine(message, true);
+    } else showJoinError(message);
+  });
+
+  peer.on("disconnected", () => {
+    if (State.convId !== boundConvId || State.peer !== peer || State.peerConnected) return;
+    if (State.role === "creator") setInviteStatus("disconnected", "Signalisation interrompue");
+    else updateChatStatus("disconnected", "Signalisation interrompue");
+    scheduleReconnect(boundConvId, true);
+  });
+}
+
+function scheduleReconnect(convId, signalingLost){
+  if (State.convId !== convId || !State.peer || State.peerConnected || State.reconnectTimer) return;
+  if (State.reconnectAttempts >= 5) {
+    if (State.role === "creator") setInviteStatus("disconnected", "Reconnexion en pause");
+    else updateChatStatus("disconnected", "Reconnexion en pause");
+    pushSystemLine("Reconnexion en pause après plusieurs essais. Revenez à la liste puis rouvrez cette conversation pour réessayer.", true);
+    return;
+  }
+  const delay = [1000,2000,4000,8000,15000][State.reconnectAttempts++];
+  const peer = State.peer;
+  State.reconnectTimer = setTimeout(() => {
+    State.reconnectTimer = null;
+    if (State.convId !== convId || State.peer !== peer || State.peerConnected) return;
+    if (peer.disconnected) { try { peer.reconnect(); } catch (e) {} }
+    if (State.role === "joiner" && State.remotePeerId) {
+      setTimeout(() => {
+        if (State.convId !== convId || State.peer !== peer || State.peerConnected || peer.destroyed) return;
+        if (State.conn && State.conn.open) return;
+        try {
+          const conn = peer.connect(State.remotePeerId, {reliable:true});
+          State.conn = conn;
+          wireConnection(conn, false);
+        } catch (e) { scheduleReconnect(convId, false); }
+      }, signalingLost ? 1200 : 0);
+    }
+  }, delay);
+}
+
 function makePeer(id){
 
   return new Peer(id, { config: { iceServers: ICE_SERVERS } });
@@ -950,88 +1255,42 @@ function makePeer(id){
 /* ---------- Création d'une conversation ---------- */
 
 async function createConversation(){
-
+  teardownActiveSession();
   showScreen("inviteScreen");
-
   $("inviteError").classList.add("hidden");
-
-  setInviteStatus("waiting", "Génération des clés…");
-
-
+  setInviteStatus("connecting", "Génération des clés…");
 
   State.role = "creator";
-
   State.convId = randomId(12);
-
   State.keyPair = await Crypto.genKeyPair();
-
   State.myPubB64 = await Crypto.exportPub(State.keyPair.publicKey);
-
+  State.theirPubB64 = null;
   State.myId = "cf-" + randomId(10);
+  State.remotePeerId = null;
+  State.sendCounter = 0;
+  State.recvCounter = -1;
+  State.sessionKey = null;
+  State.peerConnected = false;
+  State.incomingTransfers = new Map();
 
-
-
-  await Store.put("conversations", {
-
-    id: State.convId, role: "creator", peerId: State.myId,
-
-    ttlMs: State.ttlMs, createdAt: Date.now()
-
-  });
-
-
-
-  setInviteStatus("waiting", "Ouverture du canal de connexion…");
-
-  State.peer = makePeer(State.myId);
-
-
-
-  State.peer.on("open", () => {
-
-    const link = buildInviteLink();
-
-    $("inviteLinkBox").textContent = link;
-
-    setInviteStatus("waiting", "En attente du destinataire…");
-
-    const shareBtn = $("btnShareInvite");
-
-    if (navigator.share){ shareBtn.classList.remove("hidden"); }
-
-  });
-
-
-
-  State.peer.on("connection", (conn) => {
-
-    if (State.conn){ conn.close(); return; } // un seul interlocuteur pour cette v1
-
-    State.conn = conn;
-
-    setInviteStatus("connecting", "Connexion en cours…");
-
-    wireConnection(conn, true);
-
-  });
-
-
-
-  State.peer.on("error", (err) => {
-
-    showInviteError(explainPeerError(err));
-
-  });
-
-  State.peer.on("disconnected", () => {
-
-    if (!State.peerConnected) showInviteError("Connexion au service de signalisation perdue. Réessayez.");
-
-  });
-
+  const now = Date.now();
+  try {
+    await Store.put("conversations", {
+      id:State.convId, role:"creator", peerId:State.myId, localPeerId:State.myId,
+      remotePeerId:null, privateKey:State.keyPair.privateKey, publicKey:State.keyPair.publicKey,
+      myPubB64:State.myPubB64, theirPubB64:null, ttlMs:State.ttlMs,
+      createdAt:now, lastActivity:now, lastMessage:"Invitation créée", connectionStatus:"waiting",
+      sendCounter:0, recvCounter:-1, name:"Nouvelle conversation"
+    });
+  } catch (e) {
+    showInviteError("Ce navigateur n'a pas pu conserver les clés de reprise dans IndexedDB.");
+    return;
+  }
+  setLastConversation(State.convId);
+  await refreshConversationList();
+  setInviteStatus("connecting", "Ouverture du canal de connexion…");
+  startPeerForActiveConversation(false);
 }
-
-
 
 function buildInviteLink(){
 
@@ -1068,97 +1327,74 @@ function showInviteError(msg){
 /* ---------- Rejoindre une conversation ---------- */
 
 async function joinFromLink(link){
-
   showScreen("joinScreen");
-
   $("joinError").classList.add("hidden");
-
   $("btnCancelJoin").classList.add("hidden");
-
   setJoinStatus("connecting", "Lecture de l'invitation…");
 
-
-
-  let hash;
-
-  try{
-
-    const url = new URL(link.trim());
-
+  let url, hash;
+  try {
+    url = new URL(link.trim());
     hash = new URLSearchParams(url.hash.replace(/^#/, ""));
-
-  } catch(e){
-
+  } catch (e) {
     showJoinError("Ce lien n'est pas valide.");
-
     return;
-
   }
 
   const peerId = hash.get("id");
-
-  const theirPub = hash.get("pub");
-
+  const theirPubB64 = hash.get("pub");
   const convId = hash.get("cv");
-
-  if (!peerId || !theirPub || !convId){
-
+  if (!peerId || !theirPubB64 || !convId ||
+      !/^[-A-Za-z0-9_]+$/.test(peerId) || !/^[-A-Za-z0-9_]+$/.test(convId)) {
     showJoinError("Invitation incomplète ou invalide.");
-
     return;
-
   }
 
+  const existing = await Store.get("conversations", convId);
+  if (existing) {
+    if (existing.role === "joiner" && existing.remotePeerId === peerId &&
+        existing.theirPubB64 === theirPubB64 && existing.privateKey && existing.publicKey) {
+      try { history.replaceState(null, "", url.pathname + url.search); } catch (e) {}
+      await resumeConversation(convId);
+    } else {
+      showJoinError("Une conversation portant cet identifiant existe déjà mais ne correspond pas à cette invitation.");
+    }
+    return;
+  }
 
-
+  teardownActiveSession();
   State.role = "joiner";
-
   State.convId = convId;
-
-  State.theirPubB64 = decodeURIComponent(theirPub);
-
+  State.remotePeerId = peerId;
+  State.theirPubB64 = theirPubB64;
   State.keyPair = await Crypto.genKeyPair();
-
   State.myPubB64 = await Crypto.exportPub(State.keyPair.publicKey);
-
   State.myId = "cf-" + randomId(10);
+  State.sendCounter = 0;
+  State.recvCounter = -1;
+  State.sessionKey = null;
+  State.peerConnected = false;
+  State.incomingTransfers = new Map();
 
+  const now = Date.now();
+  try {
+    await Store.put("conversations", {
+      id:State.convId, role:"joiner", peerId:State.myId, localPeerId:State.myId,
+      remotePeerId:peerId, privateKey:State.keyPair.privateKey, publicKey:State.keyPair.publicKey,
+      myPubB64:State.myPubB64, theirPubB64:State.theirPubB64, ttlMs:State.ttlMs,
+      createdAt:now, lastActivity:now, lastMessage:"Invitation acceptée", connectionStatus:"connecting",
+      sendCounter:0, recvCounter:-1, name:"Nouvelle conversation"
+    });
+  } catch (e) {
+    showJoinError("Ce navigateur n'a pas pu conserver les clés de reprise dans IndexedDB.");
+    return;
+  }
 
-
-  await Store.put("conversations", {
-
-    id: State.convId, role: "joiner", peerId: State.myId,
-
-    ttlMs: State.ttlMs, createdAt: Date.now()
-
-  });
-
-
-
+  try { history.replaceState(null, "", url.pathname + url.search); } catch (e) {}
+  setLastConversation(State.convId);
+  await refreshConversationList();
   setJoinStatus("connecting", "Connexion au service de signalisation…");
-
-  State.peer = makePeer(State.myId);
-
-
-
-  State.peer.on("open", () => {
-
-    setJoinStatus("connecting", "Connexion à votre correspondant…");
-
-    const conn = State.peer.connect(peerId, { reliable: true });
-
-    State.conn = conn;
-
-    wireConnection(conn, false);
-
-  });
-
-  State.peer.on("error", (err) => {
-
-    showJoinError(explainPeerError(err));
-
-  });
-
+  startPeerForActiveConversation(false);
 }
 
 function setJoinStatus(kind, text){
@@ -1984,157 +2220,86 @@ function showQr(link){
 /* ======================= ÉVÉNEMENTS UI ======================= */
 
 $("btnCreate").addEventListener("click", createConversation);
-
 $("btnJoin").addEventListener("click", () => {
-
-  const v = $("joinInput").value.trim();
-
-  if (!v){ return; }
-
-  joinFromLink(v);
-
+  const value = $("joinInput").value.trim();
+  if (value) joinFromLink(value);
 });
-
-$("btnCancelInvite").addEventListener("click", () => { location.reload(); });
-
-$("btnCancelJoin").addEventListener("click", () => { location.reload(); });
-
-
+$("btnCancelInvite").addEventListener("click", exitToList);
+$("btnCancelJoin").addEventListener("click", exitToList);
+$("btnBackList").addEventListener("click", exitToList);
 
 $("btnCopyInvite").addEventListener("click", async () => {
-
   const link = $("inviteLinkBox").textContent;
-
-  try{ await navigator.clipboard.writeText(link); $("btnCopyInvite").textContent = "Lien copié"; }
-
-  catch(e){ /* presse-papiers indisponible : le lien reste affiché pour copie manuelle */ }
-
+  try { await navigator.clipboard.writeText(link); $("btnCopyInvite").textContent = "Lien copié"; }
+  catch (e) { prompt("Copiez ce lien d'invitation", link); }
 });
-
 $("btnShareInvite").addEventListener("click", async () => {
-
   const link = $("inviteLinkBox").textContent;
-
-  try{ await navigator.share({ title:"Rejoindre ma conversation Confidant", url: link }); } catch(e){}
-
+  try { await navigator.share({title:"Rejoindre ma conversation Confidant", url:link}); } catch (e) {}
 });
-
-$("btnShowQr").addEventListener("click", () => showQr($("inviteLinkBox").textContent));
-
-
+$("btnShowQr").addEventListener("click", () => {
+  try { showQr($("inviteLinkBox").textContent); }
+  catch (e) { showInviteError("La bibliothèque QR n'a pas été chargée. Vérifiez votre connexion."); }
+});
 
 $("btnSend").addEventListener("click", () => {
-
-  const v = $("textInput").value;
-
-  if (!v.trim()) return;
-
+  const value = $("textInput").value;
+  if (!value.trim()) return;
   $("textInput").value = "";
-
   $("textInput").style.height = "auto";
-
-  sendTextMessage(v);
-
+  sendTextMessage(value);
 });
-
-$("textInput").addEventListener("keydown", (e) => {
-
-  if (e.key === "Enter" && !e.shiftKey){ e.preventDefault(); $("btnSend").click(); }
-
+$("textInput").addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); $("btnSend").click(); }
 });
-
-$("textInput").addEventListener("input", (e) => {
-
-  e.target.style.height = "auto";
-
-  e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
-
+$("textInput").addEventListener("input", (event) => {
+  event.target.style.height = "auto";
+  event.target.style.height = Math.min(event.target.scrollHeight, 120) + "px";
 });
-
-
 
 $("btnAttach").addEventListener("click", () => $("fileInput").click());
-
-$("fileInput").addEventListener("change", (e) => {
-
-  const file = e.target.files[0];
-
+$("fileInput").addEventListener("change", (event) => {
+  const file = event.target.files[0];
   if (!file) return;
-
-  const kind = file.type.startsWith("video/") ? "video" : "image";
-
-  sendFile(file, kind);
-
-  e.target.value = "";
-
+  sendFile(file, file.type.startsWith("video/") ? "video" : "image");
+  event.target.value = "";
 });
-
-
-
 let recording = false;
-
 $("btnRecord").addEventListener("click", () => {
-
   recording = !recording;
-
   if (recording) startRecording(); else stopRecording();
-
 });
-
-
 
 $("btnSettings").addEventListener("click", () => $("settingsOverlay").classList.remove("hidden"));
-
 $("btnCloseSettings").addEventListener("click", () => $("settingsOverlay").classList.add("hidden"));
-
-$("ttlSelect").addEventListener("change", async (e) => {
-
-  State.ttlMs = parseInt(e.target.value, 10);
-
-  const conv = await Store.get("conversations", State.convId);
-
-  if (conv){ conv.ttlMs = State.ttlMs; await Store.put("conversations", conv); }
-
+$("ttlSelect").addEventListener("change", async (event) => {
+  State.ttlMs = parseInt(event.target.value, 10);
+  if (State.convId) await saveConversationPatch(State.convId, {ttlMs:State.ttlMs});
 });
-
 $("btnClearHistory").addEventListener("click", async () => {
-
-  if (!confirm("Effacer tout l'historique local de cette conversation ? Cette action est irréversible sur cet appareil.")) return;
-
+  if (!confirm("Effacer l'historique local ? Les captures, exports et copies déjà conservés ne peuvent pas être effacés.")) return;
+  if (State.peerConnected) await sendEncryptedControl({type:"clear-history"});
   await Store.clearConversationMessages(State.convId);
-
   await loadHistory();
-
-  if (State.peerConnected){ try{ State.conn.send({ t:"delete-request", scope:"all" }); }catch(e){} }
-
   $("settingsOverlay").classList.add("hidden");
-
 });
-
 $("btnDeleteConv").addEventListener("click", async () => {
-
-  if (!confirm("Supprimer définitivement cette conversation sur cet appareil ?")) return;
-
-  if (State.peerConnected){ try{ State.conn.send({ t:"delete-request", scope:"all" }); }catch(e){} }
-
-  await Store.deleteConversation(State.convId);
-
-  if (State.conn) try{ State.conn.close(); }catch(e){}
-
-  if (State.peer) try{ State.peer.destroy(); }catch(e){}
-
-  location.reload();
-
+  if (!confirm("Supprimer cette conversation et son historique sur cet appareil ?")) return;
+  const id = State.convId;
+  if (State.peerConnected) await sendEncryptedControl({type:"clear-history"});
+  await Store.deleteConversation(id);
+  teardownActiveSession();
+  setLastConversation(null);
+  State.convId = null; State.role = null; State.keyPair = null;
+  State.myPubB64 = null; State.theirPubB64 = null; State.myId = null; State.remotePeerId = null;
+  $("settingsOverlay").classList.add("hidden");
+  showScreen("homeScreen");
+  await refreshConversationList();
 });
-
-
 
 window.addEventListener("beforeunload", () => {
-
-  try{ if (State.conn) State.conn.close(); }catch(e){}
-
-  try{ if (State.peer) State.peer.destroy(); }catch(e){}
-
+  try { if (State.conn) State.conn.close(); } catch (e) {}
+  try { if (State.peer) State.peer.destroy(); } catch (e) {}
 });
 
 
@@ -2142,15 +2307,27 @@ window.addEventListener("beforeunload", () => {
 /* ======================= DÉMARRAGE ======================= */
 
 (async function init(){
-
-  await Store.cleanupExpired();
-
-  if (location.hash && location.hash.includes("id=")){
-
-    joinFromLink(location.href);
-
+  try {
+    await Store.cleanupExpired();
+    await refreshConversationList();
+    if (location.hash && location.hash.includes("id=")) {
+      await joinFromLink(location.href);
+      return;
+    }
+    let last = null;
+    try { last = localStorage.getItem("confidant.lastConversation"); } catch (e) {}
+    if (last && await Store.get("conversations", last)) {
+      await resumeConversation(last);
+      return;
+    }
+    showScreen("homeScreen");
+  } catch (e) {
+    showScreen("homeScreen");
+    const warning = document.createElement("div");
+    warning.className = "err-box";
+    warning.textContent = "Confidant n'a pas pu ouvrir son stockage local. Vérifiez que le navigateur autorise IndexedDB puis rechargez la page.";
+    $("homeScreen").appendChild(warning);
   }
-
 })();
 
 
