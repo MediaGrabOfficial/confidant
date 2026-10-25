@@ -1203,11 +1203,16 @@ function startPeerForActiveConversation(isResume){
   peer.on("error", (err) => {
     if (State.convId !== boundConvId || State.peer !== peer) return;
     const message = explainPeerError(err);
-    if (State.role === "creator") showInviteError(message);
-    else if (isResume) {
-      updateChatStatus("error", "Connexion impossible");
-      pushSystemLine(message, true);
-    } else showJoinError(message);
+    if (State.role === "creator") {
+      showInviteError(message);
+      if (err && (err.type === "network" || err.type === "disconnected")) scheduleReconnect(boundConvId, true);
+    } else {
+      if (isResume) {
+        updateChatStatus("error", "Connexion impossible");
+        pushSystemLine(message, true);
+      } else showJoinError(message);
+      scheduleReconnect(boundConvId, !!(err && (err.type === "network" || err.type === "disconnected")));
+    }
   });
 
   peer.on("disconnected", () => {
@@ -1461,7 +1466,7 @@ function wireConnection(conn, isCreator){
     saveConversationPatch(boundConvId,{connectionStatus:"offline",lastActivity:Date.now()}).catch(()=>{});
     if (State.role === "creator") {
       setInviteStatus("waiting","Déconnecté — invitation toujours valable");
-      updateChatStatus("disconnected","Déconnecté"); showScreen("inviteScreen");
+      updateChatStatus("disconnected","Déconnecté");
     } else {
       updateChatStatus("disconnected","Déconnecté — nouvelle tentative");
       pushSystemLine("Votre correspondant s'est déconnecté. Les messages non confirmés restent sur cet appareil.",false);
@@ -2173,17 +2178,18 @@ async function retrySend(record){
 }
 
 async function loadHistory(){
-
   lastDayRendered = null;
-
   $("messages").innerHTML = "";
-
+  if (!State.convId) return;
   const all = await Store.allByConv(State.convId);
-
   all.sort((a,b)=>a.ts-b.ts);
-
-  for (const m of all) renderMessage(m);
-
+  for (const record of all) {
+    if (record.from === "me" && record.status === "sending") {
+      record.status = "queued";
+      await Store.put("messages", record);
+    }
+    renderMessage(record);
+  }
 }
 
 async function renderAllFromStore(){ await loadHistory(); }
