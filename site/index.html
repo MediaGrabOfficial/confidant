@@ -47,7 +47,7 @@
 
   *{box-sizing:border-box;}
 
-  html,body{height:100%;}
+  html,body{height:100%; min-height:100%;}
 
   body{
 
@@ -75,9 +75,9 @@
 
   /* ---------- Shell ---------- */
 
-  #app{ max-width:560px; margin:0 auto; min-height:100%; display:flex; flex-direction:column; }
+  #app{ max-width:560px; margin:0 auto; min-height:100%; min-height:100dvh; display:flex; flex-direction:column; }
 
-  .screen{ flex:1; display:flex; flex-direction:column; min-height:100vh; }
+  .screen{ flex:1; display:flex; flex-direction:column; min-height:100vh; min-height:100dvh; }
 
   .top{
 
@@ -167,7 +167,7 @@
 
   /* ---------- Chat ---------- */
 
-  #chatScreen{ min-height:100vh; }
+  #chatScreen{ min-height:100vh; min-height:100dvh; height:100vh; height:100dvh; }
 
   .chat-header{
 
@@ -189,7 +189,7 @@
 
   .icon-btn:hover{ background:var(--surface-2); }
 
-  .messages{ flex:1; overflow-y:auto; padding:16px 14px 90px; display:flex; flex-direction:column; gap:10px; }
+  .messages{ flex:1; min-height:0; overflow-y:auto; padding:16px 14px calc(104px + env(safe-area-inset-bottom, 0px)); display:flex; flex-direction:column; gap:10px; overscroll-behavior:contain; }
 
   .day-sep{ text-align:center; color:var(--text-2); font-size:11px; margin:10px 0 2px; }
 
@@ -227,7 +227,7 @@
 
   .composer{
 
-    position:fixed; bottom:0; left:0; right:0;
+    position:fixed; bottom:var(--keyboard-bottom, 0px); left:0; right:0;
 
     display:flex; justify-content:center;
 
@@ -235,11 +235,11 @@
 
   }
 
-  .composer-inner{ width:100%; max-width:560px; display:flex; align-items:flex-end; gap:6px; padding:10px 12px; }
+  .composer-inner{ width:100%; max-width:560px; display:flex; align-items:flex-end; gap:6px; padding:10px 12px calc(10px + env(safe-area-inset-bottom, 0px)); }
 
   .composer textarea{
 
-    flex:1; resize:none; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface);
+    flex:1; min-width:0; resize:none; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface);
 
     padding:10px 12px; max-height:120px; min-height:40px;
 
@@ -250,6 +250,12 @@
   .progress-wrap{ width:160px; height:3px; background:var(--surface-2); border-radius:2px; overflow:hidden; margin-top:4px; }
 
   .progress-bar{ height:100%; background:var(--olive); width:0%; }
+
+  .scanner-overlay{ position:fixed; inset:0; z-index:50; background:rgba(34,35,31,.78); display:flex; align-items:center; justify-content:center; padding:18px; }
+  .scanner-card{ width:min(100%, 420px); background:var(--bg); border:1px solid var(--border); padding:18px; display:flex; flex-direction:column; gap:12px; }
+  .scanner-video{ display:block; width:100%; aspect-ratio:3/4; max-height:58dvh; object-fit:cover; background:#171814; }
+  .scanner-hint{ color:var(--text-2); font-size:13px; }
+  @media(max-height:560px){ .scanner-video{ aspect-ratio:16/9; max-height:42dvh; } }
 
 
 
@@ -312,6 +318,7 @@
       <div class="home-actions">
 
         <button class="btn btn-primary" id="btnCreate">Créer une conversation</button>
+        <button class="btn" id="btnScanInvite">Scanner un QR code</button>
 
       </div>
 
@@ -333,7 +340,7 @@
 
     <div class="foot-note">
 
-      Aucun message en clair ne transite par un serveur. La connexion directe entre vos deux appareils peut être bloquée par certains réseaux (écoles, entreprises) — voir les limites en bas de la conversation.
+      Aucun serveur ne lit le contenu de vos messages.
 
     </div>
 
@@ -417,12 +424,13 @@
       <button class="icon-btn chat-back" id="btnBackList" aria-label="Retour à mes conversations">‹</button>
       <div class="chat-header-left">
 
-        <div class="chat-title">Conversation privée</div>
+        <div class="chat-title" id="chatTitle">Conversation privée</div>
 
         <div class="chat-status"><span id="chatStatusDot" class="status-dot connecting"></span><span id="chatStatusText">Connexion…</span></div>
 
       </div>
 
+      <button class="icon-btn hidden" id="btnChatInvite" aria-label="Invitation et QR code">▦</button>
       <button class="icon-btn" id="btnSettings" aria-label="Réglages">⋯</button>
 
     </div>
@@ -489,6 +497,8 @@
 
     <div class="row">
 
+      <button class="btn" id="btnEnableNotifications" style="border:1px solid var(--border);">Activer les notifications</button>
+      <div class="limits-note">Les notifications arrivent quand Confidant est ouvert et que la connexion revient. Sans serveur de relais de messages, un téléphone complètement déconnecté ne peut pas recevoir instantanément.</div>
       <button class="btn" id="btnClearHistory" style="border:1px solid var(--border);">Effacer l'historique local</button>
 
       <button class="btn btn-danger" id="btnDeleteConv">Supprimer la conversation</button>
@@ -497,11 +507,7 @@
 
     </div>
 
-    <div class="limits-note">
-
-      Limites : images ≤ 8 Mo, vidéos ≤ 15 Mo, messages vocaux ≤ 10 Mo. La suppression automatique efface les données de cet appareil ; une copie prise par votre correspondant (capture d'écran, export) ne peut pas être effacée à distance. Le nettoyage s'exécute à l'ouverture de l'application et périodiquement tant qu'elle reste ouverte — s'il manque un lancement, le nettoyage se fait au suivant.
-
-    </div>
+    <div class="limits-note">La suppression automatique concerne cet appareil uniquement. Une capture d’écran ou une copie déjà enregistrée ailleurs ne peut pas être effacée à distance.</div>
 
   </div>
 
@@ -509,9 +515,20 @@
 
 
 
+<div id="scannerOverlay" class="scanner-overlay hidden" role="dialog" aria-modal="true" aria-label="Scanner une invitation">
+  <div class="scanner-card">
+    <div class="wordmark">Scanner une invitation</div>
+    <video id="scannerVideo" class="scanner-video" autoplay muted playsinline></video>
+    <canvas id="scannerCanvas" class="hidden"></canvas>
+    <div id="scannerHint" class="scanner-hint">Placez le QR code dans le cadre. La caméra reste utilisée uniquement pendant le scan.</div>
+    <button class="btn btn-ghost" id="btnStopScanner" style="border:1px solid var(--border);">Annuler</button>
+  </div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.min.js"></script>
 
 <script>
 
