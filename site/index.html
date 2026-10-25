@@ -1,0 +1,2161 @@
+<!DOCTYPE html>
+
+<html lang="fr">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#485440">
+<meta name="color-scheme" content="light">
+
+<title>Confidant — messagerie privée</title>
+
+<style>
+
+  :root{
+
+    --bg:#EAE7DF;
+
+    --surface:#F2F0E8;
+
+    --surface-2:#E2DFD5;
+
+    --text:#22231F;
+
+    --text-2:#707168;
+
+    --olive:#485440;
+
+    --bronze:#947650;
+
+    --border:rgba(34,35,31,0.14);
+
+    --danger:#8a3b2d;
+
+    --radius:3px;
+
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+    --font-serif: Georgia, "Iowan Old Style", "Palatino Linotype", "Times New Roman", serif;
+
+  }
+
+  *{box-sizing:border-box;}
+
+  html,body{height:100%;}
+
+  body{
+
+    margin:0; background:var(--bg); color:var(--text);
+
+    font-family:var(--font-sans); font-size:15px; line-height:1.5;
+
+    -webkit-font-smoothing:antialiased;
+
+  }
+
+  button, input, select{ font-family:inherit; font-size:inherit; color:inherit; }
+
+  button{ cursor:pointer; background:none; border:none; }
+
+  button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible{
+
+    outline:2px solid var(--olive); outline-offset:2px;
+
+  }
+
+  .hidden{ display:none !important; }
+
+
+
+  /* ---------- Shell ---------- */
+
+  #app{ max-width:560px; margin:0 auto; min-height:100%; display:flex; flex-direction:column; }
+
+  .screen{ flex:1; display:flex; flex-direction:column; min-height:100vh; }
+
+  .top{
+
+    padding:28px 20px 18px; border-bottom:1px solid var(--border);
+
+  }
+
+  .wordmark{ font-family:var(--font-serif); font-size:22px; letter-spacing:0.01em; }
+
+  .sub{ color:var(--text-2); font-size:13px; margin-top:4px; }
+
+
+
+  /* ---------- Home ---------- */
+
+  .home-body{ flex:1; display:flex; flex-direction:column; justify-content:center; gap:14px; padding:20px; }
+
+  .home-actions{ display:flex; flex-direction:column; gap:10px; }
+
+  .btn{
+
+    display:flex; align-items:center; justify-content:center; gap:8px;
+
+    padding:14px 18px; border-radius:var(--radius); border:1px solid var(--border);
+
+    background:var(--surface); font-size:15px; transition:border-color .15s;
+
+  }
+
+  .btn:hover{ border-color:var(--olive); }
+
+  .btn-primary{ background:var(--olive); color:#F2F0E8; border-color:var(--olive); }
+
+  .btn-primary:hover{ background:#3c4635; }
+
+  .btn-bronze{ background:var(--bronze); color:#F2F0E8; border-color:var(--bronze); }
+
+  .btn-ghost{ background:transparent; }
+
+  .btn-danger{ color:var(--danger); border-color:var(--danger); background:transparent; }
+
+  .btn-sm{ padding:8px 12px; font-size:13px; }
+
+  .join-row{ display:flex; gap:8px; }
+
+  .join-row input{ flex:1; padding:12px 14px; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface); }
+
+  .foot-note{ color:var(--text-2); font-size:12px; padding:16px 20px; }
+
+
+
+  /* ---------- Invite / status screens ---------- */
+
+  .center-col{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; padding:28px 20px; text-align:center; }
+
+  .status-dot{ width:9px; height:9px; border-radius:50%; display:inline-block; margin-right:6px; }
+
+  .status-dot.waiting{ background:var(--bronze); }
+
+  .status-dot.connecting{ background:var(--bronze); animation:pulse 1.2s infinite; }
+
+  .status-dot.connected{ background:var(--olive); }
+
+  .status-dot.error, .status-dot.disconnected{ background:var(--danger); }
+
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:.35;} }
+
+  .invite-box{ width:100%; display:flex; flex-direction:column; gap:12px; align-items:center; }
+
+  .invite-link{
+
+    width:100%; word-break:break-all; font-size:12px; color:var(--text-2);
+
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:12px;
+
+    font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  }
+
+  .invite-actions{ display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+
+  #qrHolder{ background:#fff; padding:10px; border-radius:var(--radius); }
+
+  .err-box{ color:var(--danger); font-size:13px; border:1px solid var(--danger); border-radius:var(--radius); padding:12px; }
+
+
+
+  /* ---------- Chat ---------- */
+
+  #chatScreen{ min-height:100vh; }
+
+  .chat-header{
+
+    display:flex; align-items:center; justify-content:space-between;
+
+    padding:14px 18px; border-bottom:1px solid var(--border); background:var(--bg);
+
+    position:sticky; top:0; z-index:5;
+
+  }
+
+  .chat-header-left{ display:flex; flex-direction:column; }
+
+  .chat-title{ font-size:15px; }
+
+  .chat-status{ font-size:12px; color:var(--text-2); }
+
+  .icon-btn{ padding:6px 8px; border-radius:var(--radius); }
+
+  .icon-btn:hover{ background:var(--surface-2); }
+
+  .messages{ flex:1; overflow-y:auto; padding:16px 14px 90px; display:flex; flex-direction:column; gap:10px; }
+
+  .day-sep{ text-align:center; color:var(--text-2); font-size:11px; margin:10px 0 2px; }
+
+  .msg-row{ display:flex; }
+
+  .msg-row.me{ justify-content:flex-end; }
+
+  .bubble{
+
+    max-width:78%; padding:9px 12px; border-radius:var(--radius); border:1px solid var(--border);
+
+    background:var(--surface); font-size:14px; white-space:pre-wrap; word-break:break-word;
+
+  }
+
+  .msg-row.me .bubble{ background:var(--olive); color:#F2F0E8; border-color:var(--olive); }
+
+  .bubble img, .bubble video{ max-width:100%; border-radius:2px; display:block; }
+
+  .bubble audio{ width:220px; }
+
+  .meta-line{ display:flex; gap:6px; align-items:center; margin-top:4px; font-size:10px; color:var(--text-2); }
+
+  .msg-row.me .meta-line{ justify-content:flex-end; }
+
+  .meta-line .fail{ color:var(--danger); }
+
+  .meta-line button{ text-decoration:underline; font-size:10px; color:var(--text-2); }
+
+  .system-line{ text-align:center; color:var(--text-2); font-size:12px; padding:4px 0; }
+
+  .system-line.warn{ color:var(--danger); }
+
+
+
+  .composer{
+
+    position:fixed; bottom:0; left:0; right:0;
+
+    display:flex; justify-content:center;
+
+    border-top:1px solid var(--border); background:var(--bg);
+
+  }
+
+  .composer-inner{ width:100%; max-width:560px; display:flex; align-items:flex-end; gap:6px; padding:10px 12px; }
+
+  .composer textarea{
+
+    flex:1; resize:none; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface);
+
+    padding:10px 12px; max-height:120px; min-height:40px;
+
+  }
+
+  .composer .icon-btn{ font-size:18px; padding:9px; }
+
+  .progress-wrap{ width:160px; height:3px; background:var(--surface-2); border-radius:2px; overflow:hidden; margin-top:4px; }
+
+  .progress-bar{ height:100%; background:var(--olive); width:0%; }
+
+
+
+  /* Settings panel */
+
+  .panel-overlay{ position:fixed; inset:0; background:rgba(34,35,31,0.35); display:flex; justify-content:flex-end; z-index:20; }
+
+  .panel{ width:300px; max-width:88vw; background:var(--bg); height:100%; border-left:1px solid var(--border); padding:20px; overflow-y:auto; }
+
+  .panel h3{ font-family:var(--font-serif); font-weight:400; font-size:18px; margin:0 0 14px; }
+
+  .panel label{ display:block; font-size:12px; color:var(--text-2); margin:14px 0 6px; }
+
+  .panel select{ width:100%; padding:9px; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface); }
+
+  .panel .row{ display:flex; flex-direction:column; gap:8px; margin-top:18px; }
+
+  .fingerprint{ font-family:ui-monospace, monospace; font-size:15px; letter-spacing:1px; background:var(--surface); padding:10px; border-radius:var(--radius); text-align:center; }
+
+  .limits-note{ font-size:11px; color:var(--text-2); margin-top:18px; line-height:1.6; }
+
+</style>
+
+</head>
+
+<body>
+
+<div id="app">
+
+
+
+  <!-- HOME -->
+
+  <section id="homeScreen" class="screen">
+
+    <div class="top">
+
+      <div class="wordmark">Confidant</div>
+
+      <div class="sub">Discussion privée, directe, chiffrée. Sans compte.</div>
+
+    </div>
+
+    <div class="home-body">
+
+      <div class="home-actions">
+
+        <button class="btn btn-primary" id="btnCreate">Créer une conversation</button>
+
+      </div>
+
+      <div class="join-row">
+
+        <input id="joinInput" placeholder="Coller un lien d'invitation…" autocomplete="off" spellcheck="false">
+
+        <button class="btn btn-ghost" id="btnJoin" style="border:1px solid var(--border);">Rejoindre</button>
+
+      </div>
+
+    </div>
+
+    <div class="foot-note">
+
+      Aucun message en clair ne transite par un serveur. La connexion directe entre vos deux appareils peut être bloquée par certains réseaux (écoles, entreprises) — voir les limites en bas de la conversation.
+
+    </div>
+
+  </section>
+
+
+
+  <!-- INVITE (creator waiting) -->
+
+  <section id="inviteScreen" class="screen hidden">
+
+    <div class="top">
+
+      <div class="wordmark">Nouvelle conversation</div>
+
+      <div class="sub"><span id="inviteStatusDot" class="status-dot waiting"></span><span id="inviteStatusText">Génération des clés…</span></div>
+
+    </div>
+
+    <div class="center-col">
+
+      <div class="invite-box">
+
+        <div id="inviteLinkBox" class="invite-link"></div>
+
+        <div class="invite-actions">
+
+          <button class="btn btn-sm" id="btnCopyInvite" style="border:1px solid var(--border);">Copier le lien</button>
+
+          <button class="btn btn-sm hidden" id="btnShareInvite" style="border:1px solid var(--border);">Partager</button>
+
+          <button class="btn btn-sm" id="btnShowQr" style="border:1px solid var(--border);">Afficher le QR code</button>
+
+        </div>
+
+        <div id="qrHolder" class="hidden"></div>
+
+      </div>
+
+      <div id="inviteError" class="err-box hidden"></div>
+
+      <button class="btn btn-ghost" id="btnCancelInvite" style="border:1px solid var(--border);">Annuler</button>
+
+    </div>
+
+  </section>
+
+
+
+  <!-- JOINING -->
+
+  <section id="joinScreen" class="screen hidden">
+
+    <div class="top">
+
+      <div class="wordmark">Rejoindre</div>
+
+      <div class="sub"><span id="joinStatusDot" class="status-dot connecting"></span><span id="joinStatusText">Connexion en cours…</span></div>
+
+    </div>
+
+    <div class="center-col">
+
+      <div id="joinError" class="err-box hidden"></div>
+
+      <button class="btn btn-ghost hidden" id="btnCancelJoin" style="border:1px solid var(--border);">Retour</button>
+
+    </div>
+
+  </section>
+
+
+
+  <!-- CHAT -->
+
+  <section id="chatScreen" class="screen hidden">
+
+    <div class="chat-header">
+
+      <div class="chat-header-left">
+
+        <div class="chat-title">Conversation privée</div>
+
+        <div class="chat-status"><span id="chatStatusDot" class="status-dot connecting"></span><span id="chatStatusText">Connexion…</span></div>
+
+      </div>
+
+      <button class="icon-btn" id="btnSettings" aria-label="Réglages">⋯</button>
+
+    </div>
+
+    <div id="messages" class="messages"></div>
+
+    <div class="composer">
+
+      <div class="composer-inner">
+
+        <button class="icon-btn" id="btnAttach" aria-label="Joindre un fichier">📎</button>
+
+        <input type="file" id="fileInput" accept="image/*,video/*" class="hidden">
+
+        <button class="icon-btn" id="btnRecord" aria-label="Message vocal">🎙️</button>
+
+        <textarea id="textInput" placeholder="Écrire un message…" rows="1"></textarea>
+
+        <button class="icon-btn" id="btnSend" aria-label="Envoyer">➤</button>
+
+      </div>
+
+    </div>
+
+  </section>
+
+
+
+</div>
+
+
+
+<div id="settingsOverlay" class="panel-overlay hidden">
+
+  <div class="panel">
+
+    <h3>Réglages</h3>
+
+    <div>
+
+      <label>Vérification de l'identité (empreinte)</label>
+
+      <div class="fingerprint" id="fingerprintBox">—</div>
+
+      <div class="limits-note">Comparez cette empreinte avec votre correspondant par un autre moyen (appel, en personne) pour confirmer qu'aucun intermédiaire n'intercepte la connexion.</div>
+
+    </div>
+
+    <label for="ttlSelect">Suppression automatique des messages</label>
+
+    <select id="ttlSelect">
+
+      <option value="86400000">Après 24 heures</option>
+
+      <option value="1209600000">Après 14 jours</option>
+
+      <option value="2592000000" selected>Après 30 jours</option>
+
+      <option value="5184000000">Après 60 jours</option>
+
+      <option value="7776000000">Après 90 jours</option>
+
+    </select>
+
+    <div class="row">
+
+      <button class="btn" id="btnClearHistory" style="border:1px solid var(--border);">Effacer l'historique local</button>
+
+      <button class="btn btn-danger" id="btnDeleteConv">Supprimer la conversation</button>
+
+      <button class="btn btn-ghost" id="btnCloseSettings" style="border:1px solid var(--border);">Fermer</button>
+
+    </div>
+
+    <div class="limits-note">
+
+      Limites : images ≤ 8 Mo, vidéos ≤ 15 Mo, messages vocaux ≤ 10 Mo. La suppression automatique efface les données de cet appareil ; une copie prise par votre correspondant (capture d'écran, export) ne peut pas être effacée à distance. Le nettoyage s'exécute à l'ouverture de l'application et périodiquement tant qu'elle reste ouverte — s'il manque un lancement, le nettoyage se fait au suivant.
+
+    </div>
+
+  </div>
+
+</div>
+
+
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+<script>
+
+(function(){
+
+"use strict";
+
+
+
+/* ======================= CONFIGURATION ======================= */
+
+const MAX_IMAGE_BYTES = 8  * 1024 * 1024;
+
+const MAX_VIDEO_BYTES = 15 * 1024 * 1024;
+
+const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
+
+const CHUNK_SIZE = 16 * 1024; // taille des morceaux en clair avant chiffrement
+
+const ICE_SERVERS = [
+
+  { urls: "stun:stun.l.google.com:19302" },
+
+  { urls: "stun:global.stun.twilio.com:3478" }
+
+  // Aucun serveur TURN n'est fourni : sans TURN, une connexion directe peut
+
+  // échouer sur certains réseaux restrictifs (voir note de fiabilité).
+
+];
+
+const DB_NAME = "confidant-store";
+
+const DB_VERSION = 1;
+
+
+
+/* ======================= UTILITAIRES ======================= */
+
+const $ = (id) => document.getElementById(id);
+
+const enc = new TextEncoder();
+
+const dec = new TextDecoder();
+
+
+
+function b64urlEncode(buf){
+
+  const bytes = new Uint8Array(buf);
+
+  let bin = "";
+
+  for (let i=0;i<bytes.length;i++) bin += String.fromCharCode(bytes[i]);
+
+  return btoa(bin).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+
+}
+
+function b64urlDecode(str){
+
+  str = str.replace(/-/g,"+").replace(/_/g,"/");
+
+  while (str.length % 4) str += "=";
+
+  const bin = atob(str);
+
+  const bytes = new Uint8Array(bin.length);
+
+  for (let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+
+  return bytes.buffer;
+
+}
+
+function randomId(bytesLen){
+
+  const b = crypto.getRandomValues(new Uint8Array(bytesLen));
+
+  return b64urlEncode(b);
+
+}
+
+function concatBytes(...arrs){
+
+  let len = 0;
+
+  for (const a of arrs) len += a.byteLength;
+
+  const out = new Uint8Array(len);
+
+  let off = 0;
+
+  for (const a of arrs){ out.set(new Uint8Array(a), off); off += a.byteLength; }
+
+  return out;
+
+}
+
+function cmpBytes(a,b){
+
+  const ua=new Uint8Array(a), ub=new Uint8Array(b);
+
+  const len = Math.min(ua.length, ub.length);
+
+  for (let i=0;i<len;i++){ if (ua[i]!==ub[i]) return ua[i]-ub[i]; }
+
+  return ua.length-ub.length;
+
+}
+
+function fmtTime(ts){
+
+  const d = new Date(ts);
+
+  return d.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"});
+
+}
+
+function fmtDay(ts){
+
+  return new Date(ts).toLocaleDateString(undefined,{weekday:"long", day:"numeric", month:"long"});
+
+}
+
+
+
+/* ======================= CRYPTOGRAPHIE ======================= */
+
+// ECDH P-256 pour l'accord de clé, HKDF-SHA256 pour dériver une clé
+
+// AES-256-GCM de session. Chaque message a un IV aléatoire propre (jamais
+
+// réutilisé) et des données authentifiées (AAD) couvrant l'identifiant de
+
+// conversation, le compteur et l'émetteur, pour détecter l'altération et le
+
+// rejeu. Il n'y a PAS de renouvellement de clé façon Double Ratchet : une
+
+// seule clé de session dérivée à la connexion est utilisée pour toute la
+
+// durée de vie de cette conversation. En conséquence, il n'y a pas de
+
+// confidentialité persistante complète message par message : la
+
+// compromission ultérieure des clés ECDH de session permettrait de
+
+// déchiffrer les messages échangés durant cette session.
+
+const Crypto = {
+
+  async genKeyPair(){
+
+    return crypto.subtle.generateKey({name:"ECDH", namedCurve:"P-256"}, true, ["deriveBits"]);
+
+  },
+
+  async exportPub(key){
+
+    const raw = await crypto.subtle.exportKey("raw", key);
+
+    return b64urlEncode(raw);
+
+  },
+
+  async importPub(b64){
+
+    const raw = b64urlDecode(b64);
+
+    return crypto.subtle.importKey("raw", raw, {name:"ECDH", namedCurve:"P-256"}, true, []);
+
+  },
+
+  async deriveSessionKey(myPrivateKey, theirPublicKey, myPubB64, theirPubB64){
+
+    const bits = await crypto.subtle.deriveBits({name:"ECDH", public: theirPublicKey}, myPrivateKey, 256);
+
+    const myRaw = b64urlDecode(myPubB64);
+
+    const theirRaw = b64urlDecode(theirPubB64);
+
+    // ordre indépendant du rôle (créateur/invité) pour obtenir le même sel
+
+    const ordered = cmpBytes(myRaw, theirRaw) <= 0 ? [myRaw, theirRaw] : [theirRaw, myRaw];
+
+    const salt = concatBytes(ordered[0], ordered[1]);
+
+    const hkdfKey = await crypto.subtle.importKey("raw", bits, "HKDF", false, ["deriveKey"]);
+
+    const aesKey = await crypto.subtle.deriveKey(
+
+      {name:"HKDF", hash:"SHA-256", salt, info: enc.encode("confidant-session-v1")},
+
+      hkdfKey, {name:"AES-GCM", length:256}, true, ["encrypt","decrypt"]
+
+    );
+
+    return aesKey;
+
+  },
+
+  async fingerprint(myPubB64, theirPubB64){
+
+    const myRaw = b64urlDecode(myPubB64);
+
+    const theirRaw = b64urlDecode(theirPubB64);
+
+    const ordered = cmpBytes(myRaw, theirRaw) <= 0 ? [myRaw, theirRaw] : [theirRaw, myRaw];
+
+    const digest = await crypto.subtle.digest("SHA-256", concatBytes(ordered[0], ordered[1]));
+
+    const bytes = new Uint8Array(digest).slice(0, 6);
+
+    return Array.from(bytes).map(b => String(b).padStart(3,"0")).join(" ");
+
+  },
+
+  async encrypt(aesKey, aadStr, plaintextBytes){
+
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+
+    const aad = enc.encode(aadStr);
+
+    const ct = await crypto.subtle.encrypt({name:"AES-GCM", iv, additionalData: aad, tagLength:128}, aesKey, plaintextBytes);
+
+    return { iv: b64urlEncode(iv), ct: b64urlEncode(ct) };
+
+  },
+
+  async decrypt(aesKey, aadStr, ivB64, ctB64){
+
+    try{
+
+      const iv = new Uint8Array(b64urlDecode(ivB64));
+
+      const ct = b64urlDecode(ctB64);
+
+      const aad = enc.encode(aadStr);
+
+      const pt = await crypto.subtle.decrypt({name:"AES-GCM", iv, additionalData: aad, tagLength:128}, aesKey, ct);
+
+      return new Uint8Array(pt);
+
+    } catch(e){
+
+      return null; // altéré, mauvaise clé, ou données corrompues : rejeté
+
+    }
+
+  },
+
+  async exportRawKey(key){ return crypto.subtle.exportKey("raw", key); },
+
+  async importRawKey(raw){
+
+    return crypto.subtle.importKey("raw", raw, {name:"AES-GCM", length:256}, true, ["encrypt","decrypt"]);
+
+  }
+
+};
+
+
+
+/* ======================= STOCKAGE (IndexedDB) ======================= */
+
+const Store = {
+
+  db: null,
+
+  async open(){
+
+    if (this.db) return this.db;
+
+    this.db = await new Promise((resolve, reject) => {
+
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+
+      req.onupgradeneeded = () => {
+
+        const db = req.result;
+
+        if (!db.objectStoreNames.contains("conversations")) db.createObjectStore("conversations", { keyPath: "id" });
+
+        if (!db.objectStoreNames.contains("messages")){
+
+          const s = db.createObjectStore("messages", { keyPath: "id" });
+
+          s.createIndex("byConv", "convId");
+
+          s.createIndex("byExpiry", "expiresAt");
+
+        }
+
+      };
+
+      req.onsuccess = () => resolve(req.result);
+
+      req.onerror = () => reject(req.error);
+
+    });
+
+    return this.db;
+
+  },
+
+  async tx(store, mode){
+
+    const db = await this.open();
+
+    return db.transaction(store, mode).objectStore(store);
+
+  },
+
+  async put(store, value){
+
+    const s = await this.tx(store, "readwrite");
+
+    return new Promise((res, rej) => { const r = s.put(value); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); });
+
+  },
+
+  async get(store, key){
+
+    const s = await this.tx(store, "readonly");
+
+    return new Promise((res, rej) => { const r = s.get(key); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); });
+
+  },
+
+  async delete(store, key){
+
+    const s = await this.tx(store, "readwrite");
+
+    return new Promise((res, rej) => { const r = s.delete(key); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error); });
+
+  },
+
+  async allByConv(convId){
+
+    const s = await this.tx("messages", "readonly");
+
+    const idx = s.index("byConv");
+
+    return new Promise((res, rej) => {
+
+      const out = [];
+
+      const r = idx.openCursor(IDBKeyRange.only(convId));
+
+      r.onsuccess = () => { const c = r.result; if (c){ out.push(c.value); c.continue(); } else res(out); };
+
+      r.onerror = () => rej(r.error);
+
+    });
+
+  },
+
+  async cleanupExpired(){
+
+    const s = await this.tx("messages", "readwrite");
+
+    const idx = s.index("byExpiry");
+
+    const now = Date.now();
+
+    return new Promise((resolve) => {
+
+      const r = idx.openCursor(IDBKeyRange.upperBound(now));
+
+      r.onsuccess = () => { const c = r.result; if (c){ c.delete(); c.continue(); } else resolve(); };
+
+      r.onerror = () => resolve();
+
+    });
+
+  },
+
+  async clearConversationMessages(convId){
+
+    const all = await this.allByConv(convId);
+
+    for (const m of all) await this.delete("messages", m.id);
+
+  },
+
+  async deleteConversation(convId){
+
+    await this.clearConversationMessages(convId);
+
+    await this.delete("conversations", convId);
+
+  }
+
+};
+
+
+
+/* ======================= ÉTAT ======================= */
+
+const State = {
+
+  convId: null,
+
+  role: null,            // 'creator' | 'joiner'
+
+  keyPair: null,
+
+  myPubB64: null,
+
+  theirPubB64: null,
+
+  sessionKey: null,
+
+  peer: null,
+
+  conn: null,
+
+  myId: null,
+
+  peerConnected: false,
+
+  sendCounter: 0,
+
+  recvCounter: -1,
+
+  ttlMs: 30*24*3600*1000,
+
+  incomingTransfers: new Map(), // transferId -> {chunks:[], total, received, mime, kind, size}
+
+  cleanupTimer: null
+
+};
+
+
+
+/* ======================= NAVIGATION ======================= */
+
+function showScreen(id){
+
+  for (const s of document.querySelectorAll(".screen")) s.classList.add("hidden");
+
+  $(id).classList.remove("hidden");
+
+}
+
+
+
+/* ======================= DÉMARRAGE PEERJS ======================= */
+
+function makePeer(id){
+
+  return new Peer(id, { config: { iceServers: ICE_SERVERS } });
+
+}
+
+
+
+/* ---------- Création d'une conversation ---------- */
+
+async function createConversation(){
+
+  showScreen("inviteScreen");
+
+  $("inviteError").classList.add("hidden");
+
+  setInviteStatus("waiting", "Génération des clés…");
+
+
+
+  State.role = "creator";
+
+  State.convId = randomId(12);
+
+  State.keyPair = await Crypto.genKeyPair();
+
+  State.myPubB64 = await Crypto.exportPub(State.keyPair.publicKey);
+
+  State.myId = "cf-" + randomId(10);
+
+
+
+  await Store.put("conversations", {
+
+    id: State.convId, role: "creator", peerId: State.myId,
+
+    ttlMs: State.ttlMs, createdAt: Date.now()
+
+  });
+
+
+
+  setInviteStatus("waiting", "Ouverture du canal de connexion…");
+
+  State.peer = makePeer(State.myId);
+
+
+
+  State.peer.on("open", () => {
+
+    const link = buildInviteLink();
+
+    $("inviteLinkBox").textContent = link;
+
+    setInviteStatus("waiting", "En attente du destinataire…");
+
+    const shareBtn = $("btnShareInvite");
+
+    if (navigator.share){ shareBtn.classList.remove("hidden"); }
+
+  });
+
+
+
+  State.peer.on("connection", (conn) => {
+
+    if (State.conn){ conn.close(); return; } // un seul interlocuteur pour cette v1
+
+    State.conn = conn;
+
+    setInviteStatus("connecting", "Connexion en cours…");
+
+    wireConnection(conn, true);
+
+  });
+
+
+
+  State.peer.on("error", (err) => {
+
+    showInviteError(explainPeerError(err));
+
+  });
+
+  State.peer.on("disconnected", () => {
+
+    if (!State.peerConnected) showInviteError("Connexion au service de signalisation perdue. Réessayez.");
+
+  });
+
+}
+
+
+
+function buildInviteLink(){
+
+  const url = new URL(location.href);
+
+  url.hash = `id=${encodeURIComponent(State.myId)}&pub=${encodeURIComponent(State.myPubB64)}&cv=${encodeURIComponent(State.convId)}`;
+
+  return url.toString();
+
+}
+
+function setInviteStatus(kind, text){
+
+  $("inviteStatusDot").className = "status-dot " + kind;
+
+  $("inviteStatusText").textContent = text;
+
+}
+
+function showInviteError(msg){
+
+  const box = $("inviteError");
+
+  box.textContent = msg;
+
+  box.classList.remove("hidden");
+
+  setInviteStatus("error", "Erreur");
+
+}
+
+
+
+/* ---------- Rejoindre une conversation ---------- */
+
+async function joinFromLink(link){
+
+  showScreen("joinScreen");
+
+  $("joinError").classList.add("hidden");
+
+  $("btnCancelJoin").classList.add("hidden");
+
+  setJoinStatus("connecting", "Lecture de l'invitation…");
+
+
+
+  let hash;
+
+  try{
+
+    const url = new URL(link.trim());
+
+    hash = new URLSearchParams(url.hash.replace(/^#/, ""));
+
+  } catch(e){
+
+    showJoinError("Ce lien n'est pas valide.");
+
+    return;
+
+  }
+
+  const peerId = hash.get("id");
+
+  const theirPub = hash.get("pub");
+
+  const convId = hash.get("cv");
+
+  if (!peerId || !theirPub || !convId){
+
+    showJoinError("Invitation incomplète ou invalide.");
+
+    return;
+
+  }
+
+
+
+  State.role = "joiner";
+
+  State.convId = convId;
+
+  State.theirPubB64 = decodeURIComponent(theirPub);
+
+  State.keyPair = await Crypto.genKeyPair();
+
+  State.myPubB64 = await Crypto.exportPub(State.keyPair.publicKey);
+
+  State.myId = "cf-" + randomId(10);
+
+
+
+  await Store.put("conversations", {
+
+    id: State.convId, role: "joiner", peerId: State.myId,
+
+    ttlMs: State.ttlMs, createdAt: Date.now()
+
+  });
+
+
+
+  setJoinStatus("connecting", "Connexion au service de signalisation…");
+
+  State.peer = makePeer(State.myId);
+
+
+
+  State.peer.on("open", () => {
+
+    setJoinStatus("connecting", "Connexion à votre correspondant…");
+
+    const conn = State.peer.connect(peerId, { reliable: true });
+
+    State.conn = conn;
+
+    wireConnection(conn, false);
+
+  });
+
+  State.peer.on("error", (err) => {
+
+    showJoinError(explainPeerError(err));
+
+  });
+
+}
+
+function setJoinStatus(kind, text){
+
+  $("joinStatusDot").className = "status-dot " + kind;
+
+  $("joinStatusText").textContent = text;
+
+}
+
+function showJoinError(msg){
+
+  const box = $("joinError");
+
+  box.textContent = msg;
+
+  box.classList.remove("hidden");
+
+  setJoinStatus("error", "Erreur");
+
+  $("btnCancelJoin").classList.remove("hidden");
+
+}
+
+function explainPeerError(err){
+
+  const type = err && err.type;
+
+  if (type === "peer-unavailable") return "Votre correspondant n'est pas joignable (lien expiré ou conversation déjà fermée).";
+
+  if (type === "network") return "Impossible de joindre le service de signalisation. Vérifiez votre connexion réseau.";
+
+  if (type === "browser-incompatible") return "Ce navigateur ne prend pas en charge les technologies nécessaires (WebRTC).";
+
+  if (type === "disconnected") return "Connexion au service de signalisation interrompue.";
+
+  return "Connexion impossible : " + (type || "erreur inconnue") + ". Certains réseaux (écoles, entreprises) bloquent les connexions directes ; sans serveur de relais (TURN), la connexion peut échouer.";
+
+}
+
+
+
+/* ---------- Câblage commun de la DataConnection ---------- */
+
+function wireConnection(conn, isCreator){
+
+  conn.on("open", async () => {
+
+    if (isCreator){
+
+      // on attend le "hello" de l'invité
+
+    } else {
+
+      conn.send({ t: "hello", pub: State.myPubB64 });
+
+    }
+
+  });
+
+  conn.on("data", (msg) => handleIncoming(msg, isCreator, conn));
+
+  conn.on("close", () => {
+
+    State.peerConnected = false;
+
+    updateChatStatus("disconnected", "Déconnecté");
+
+    pushSystemLine("Votre correspondant s'est déconnecté.", false);
+
+  });
+
+  conn.on("error", () => {
+
+    State.peerConnected = false;
+
+    updateChatStatus("error", "Erreur de connexion");
+
+  });
+
+}
+
+
+
+async function handleIncoming(msg, isCreator, conn){
+
+  if (!msg || typeof msg !== "object") return;
+
+
+
+  if (msg.t === "hello"){
+
+    State.theirPubB64 = msg.pub;
+
+    conn.send({ t: "hello-ack", pub: State.myPubB64 });
+
+    await finalizeSession();
+
+    return;
+
+  }
+
+  if (msg.t === "hello-ack"){
+
+    State.theirPubB64 = State.theirPubB64 || msg.pub;
+
+    await finalizeSession();
+
+    return;
+
+  }
+
+  if (msg.t === "msg"){ await receiveTextMessage(msg); return; }
+
+  if (msg.t === "chunk"){ await receiveChunk(msg); return; }
+
+  if (msg.t === "delete-request"){ await handleDeleteRequest(msg); return; }
+
+}
+
+
+
+async function finalizeSession(){
+
+  if (State.sessionKey) return; // déjà fait
+
+  State.sessionKey = await Crypto.deriveSessionKey(
+
+    State.keyPair.privateKey, await Crypto.importPub(State.theirPubB64),
+
+    State.myPubB64, State.theirPubB64
+
+  );
+
+  State.peerConnected = true;
+
+  showScreen("chatScreen");
+
+  updateChatStatus("connected", "Connecté — chiffré de bout en bout");
+
+  const fp = await Crypto.fingerprint(State.myPubB64, State.theirPubB64);
+
+  $("fingerprintBox").textContent = fp;
+
+  pushSystemLine("Connexion établie. Comparez l'empreinte dans les réglages pour confirmer l'identité de votre correspondant.", false);
+
+  await loadHistory();
+
+  startCleanupLoop();
+
+}
+
+
+
+function updateChatStatus(kind, text){
+
+  $("chatStatusDot").className = "status-dot " + kind;
+
+  $("chatStatusText").textContent = text;
+
+}
+
+
+
+/* ======================= ENVOI / RÉCEPTION — TEXTE ======================= */
+
+async function sendTextMessage(text){
+
+  if (!State.peerConnected){ pushSystemLine("Pas de connexion active : message non envoyé.", true); return; }
+
+  const counter = ++State.sendCounter;
+
+  const id = State.convId + "-" + State.myId + "-" + counter;
+
+  const plaintext = enc.encode(text);
+
+  const aad = `${State.convId}|${counter}|${State.myId}|text`;
+
+  const { iv, ct } = await Crypto.encrypt(State.sessionKey, aad, plaintext);
+
+
+
+  const record = {
+
+    id, convId: State.convId, from: "me", kind: "text", text,
+
+    ts: Date.now(), expiresAt: Date.now() + State.ttlMs, status: "sending"
+
+  };
+
+  await Store.put("messages", record);
+
+  renderMessage(record);
+
+
+
+  try{
+
+    State.conn.send({ t:"msg", counter, sender: State.myId, iv, ct });
+
+    record.status = "sent";
+
+  } catch(e){
+
+    record.status = "failed";
+
+  }
+
+  await Store.put("messages", record);
+
+  updateMessageStatus(record);
+
+}
+
+
+
+async function receiveTextMessage(msg){
+
+  if (msg.counter <= State.recvCounter){
+
+    pushSystemLine("Message rejeté (rejeu détecté).", true);
+
+    return;
+
+  }
+
+  const aad = `${State.convId}|${msg.counter}|${msg.sender}|text`;
+
+  const pt = await Crypto.decrypt(State.sessionKey, aad, msg.iv, msg.ct);
+
+  if (pt === null){
+
+    pushSystemLine("Un message n'a pas pu être authentifié et a été rejeté.", true);
+
+    return;
+
+  }
+
+  State.recvCounter = msg.counter;
+
+  const text = dec.decode(pt);
+
+  const id = State.convId + "-peer-" + msg.counter;
+
+  const record = { id, convId: State.convId, from:"peer", kind:"text", text, ts: Date.now(), expiresAt: Date.now()+State.ttlMs, status:"received" };
+
+  await Store.put("messages", record);
+
+  renderMessage(record);
+
+}
+
+
+
+/* ======================= ENVOI / RÉCEPTION — FICHIERS (découpés) ======================= */
+
+function maxForKind(kind){
+
+  if (kind === "image") return MAX_IMAGE_BYTES;
+
+  if (kind === "video") return MAX_VIDEO_BYTES;
+
+  if (kind === "audio") return MAX_AUDIO_BYTES;
+
+  return MAX_IMAGE_BYTES;
+
+}
+
+
+
+async function sendFile(file, kind){
+
+  if (!State.peerConnected){ pushSystemLine("Pas de connexion active : envoi impossible.", true); return; }
+
+  const max = maxForKind(kind);
+
+  if (file.size > max){
+
+    pushSystemLine(`Fichier trop volumineux (max ${(max/1024/1024).toFixed(0)} Mo).`, true);
+
+    return;
+
+  }
+
+  const buf = await file.arrayBuffer();
+
+  const total = Math.ceil(buf.byteLength / CHUNK_SIZE) || 1;
+
+  const transferId = randomId(9);
+
+  const id = State.convId + "-" + State.myId + "-f-" + transferId;
+
+
+
+  const localUrl = URL.createObjectURL(file);
+
+  const record = {
+
+    id, convId: State.convId, from:"me", kind, mime:file.type, ts: Date.now(),
+
+    expiresAt: Date.now()+State.ttlMs, status:"sending", progress:0, _localUrl: localUrl
+
+  };
+
+  renderMessage(record);
+
+
+
+  // on stocke le fichier déchiffré localement (c'est NOTRE copie) pour
+
+  // l'historique local ; il reste protégé par l'éventuel verrou local.
+
+  const blobCopy = file.slice(0,0).type ? file : file; // conserve le Blob d'origine
+
+  await Store.put("messages", { ...record, _localUrl: undefined, blob: file });
+
+
+
+  let sentBytes = 0;
+
+  for (let i=0; i<total; i++){
+
+    const start = i*CHUNK_SIZE, end = Math.min(start+CHUNK_SIZE, buf.byteLength);
+
+    const chunkBytes = new Uint8Array(buf.slice(start, end));
+
+    const aad = `${State.convId}|${transferId}|${i}|${total}|${kind}`;
+
+    const { iv, ct } = await Crypto.encrypt(State.sessionKey, aad, chunkBytes);
+
+    try{
+
+      State.conn.send({ t:"chunk", transferId, index:i, total, kind, mime:file.type, iv, ct, size: buf.byteLength });
+
+    } catch(e){
+
+      record.status = "failed";
+
+      updateMessageStatus(record);
+
+      return;
+
+    }
+
+    sentBytes = end;
+
+    updateProgress(id, Math.round(sentBytes/buf.byteLength*100));
+
+    // laisse respirer la boucle d'événements pour l'UI et le canal
+
+    await new Promise(r => setTimeout(r, 0));
+
+  }
+
+  record.status = "sent";
+
+  record.progress = 100;
+
+  updateMessageStatus(record);
+
+}
+
+
+
+async function receiveChunk(msg){
+
+  const { transferId, index, total, kind, mime, iv, ct, size } = msg;
+
+  const max = maxForKind(kind);
+
+  if (size > max){ pushSystemLine("Fichier reçu refusé : taille au-delà de la limite autorisée.", true); return; }
+
+
+
+  let t = State.incomingTransfers.get(transferId);
+
+  if (!t){
+
+    if (State.incomingTransfers.size > 4){ pushSystemLine("Trop de transferts simultanés, un envoi a été ignoré.", true); return; }
+
+    t = { chunks: new Array(total).fill(null), total, kind, mime, size, received: 0 };
+
+    State.incomingTransfers.set(transferId, t);
+
+  }
+
+  if (index < 0 || index >= total || t.chunks[index] !== null) return; // doublon ou index invalide ignoré
+
+
+
+  const aad = `${State.convId}|${transferId}|${index}|${total}|${kind}`;
+
+  const pt = await Crypto.decrypt(State.sessionKey, aad, iv, ct);
+
+  if (pt === null){
+
+    pushSystemLine("Un fragment de fichier n'a pas pu être authentifié ; transfert abandonné.", true);
+
+    State.incomingTransfers.delete(transferId);
+
+    return;
+
+  }
+
+  t.chunks[index] = pt;
+
+  t.received++;
+
+  updateProgress(State.convId + "-recv-" + transferId, Math.round(t.received/t.total*100), true, t);
+
+
+
+  if (t.received === t.total){
+
+    const totalLen = t.chunks.reduce((n,c)=>n+c.byteLength,0);
+
+    if (totalLen > max){
+
+      pushSystemLine("Fichier reçu refusé après réassemblage : taille invalide.", true);
+
+      State.incomingTransfers.delete(transferId);
+
+      return;
+
+    }
+
+    const full = new Uint8Array(totalLen);
+
+    let off = 0;
+
+    for (const c of t.chunks){ full.set(c, off); off += c.byteLength; }
+
+    const blob = new Blob([full], { type: t.mime || "application/octet-stream" });
+
+    State.incomingTransfers.delete(transferId);
+
+
+
+    const id = State.convId + "-peer-f-" + transferId;
+
+    const record = { id, convId: State.convId, from:"peer", kind:t.kind, mime:t.mime, ts: Date.now(), expiresAt: Date.now()+State.ttlMs, status:"received", blob };
+
+    await Store.put("messages", record);
+
+    removePendingBubble(State.convId + "-recv-" + transferId);
+
+    renderMessage(record);
+
+  }
+
+}
+
+
+
+/* ======================= MESSAGES VOCAUX ======================= */
+
+let mediaRecorder = null, recordedChunks = [];
+
+async function startRecording(){
+
+  try{
+
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+    recordedChunks = [];
+
+    mediaRecorder = new MediaRecorder(stream);
+
+    mediaRecorder.ondataavailable = (e) => { if (e.data.size>0) recordedChunks.push(e.data); };
+
+    mediaRecorder.onstop = async () => {
+
+      stream.getTracks().forEach(tr => tr.stop());
+
+      const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || "audio/webm" });
+
+      const file = new File([blob], "message-vocal.webm", { type: blob.type });
+
+      await sendFile(file, "audio");
+
+    };
+
+    mediaRecorder.start();
+
+    $("btnRecord").textContent = "⏹";
+
+    pushSystemLine("Enregistrement en cours… touchez à nouveau pour envoyer.", false);
+
+  } catch(e){
+
+    pushSystemLine("Micro indisponible ou permission refusée.", true);
+
+  }
+
+}
+
+function stopRecording(){
+
+  if (mediaRecorder && mediaRecorder.state !== "inactive"){ mediaRecorder.stop(); }
+
+  $("btnRecord").textContent = "🎙️";
+
+}
+
+
+
+/* ======================= SUPPRESSION / EXPIRATION ======================= */
+
+async function handleDeleteRequest(msg){
+
+  if (msg.scope === "all"){
+
+    await Store.clearConversationMessages(State.convId);
+
+    renderAllFromStore();
+
+    pushSystemLine("Votre correspondant a effacé l'historique de son côté ; le vôtre a été effacé aussi.", false);
+
+  } else if (msg.id){
+
+    await Store.delete("messages", msg.id);
+
+    const el = document.querySelector(`[data-id="${CSS.escape(msg.id)}"]`);
+
+    if (el) el.remove();
+
+  }
+
+}
+
+function startCleanupLoop(){
+
+  Store.cleanupExpired();
+
+  if (State.cleanupTimer) clearInterval(State.cleanupTimer);
+
+  State.cleanupTimer = setInterval(async () => {
+
+    await Store.cleanupExpired();
+
+    await renderAllFromStore();
+
+  }, 60000);
+
+}
+
+
+
+/* ======================= RENDU UI ======================= */
+
+let lastDayRendered = null;
+
+function pushSystemLine(text, isWarn){
+
+  const el = document.createElement("div");
+
+  el.className = "system-line" + (isWarn ? " warn" : "");
+
+  el.textContent = text;
+
+  $("messages").appendChild(el);
+
+  $("messages").scrollTop = $("messages").scrollHeight;
+
+}
+
+function maybeDaySeparator(ts){
+
+  const day = new Date(ts).toDateString();
+
+  if (day !== lastDayRendered){
+
+    lastDayRendered = day;
+
+    const el = document.createElement("div");
+
+    el.className = "day-sep";
+
+    el.textContent = fmtDay(ts);
+
+    $("messages").appendChild(el);
+
+  }
+
+}
+
+function renderMessage(record){
+
+  maybeDaySeparator(record.ts);
+
+  const row = document.createElement("div");
+
+  row.className = "msg-row " + (record.from === "me" ? "me" : "peer");
+
+  row.dataset.id = record.id;
+
+
+
+  const bubble = document.createElement("div");
+
+  bubble.className = "bubble";
+
+
+
+  if (record.kind === "text"){
+
+    bubble.textContent = record.text;
+
+  } else if (record.kind === "image"){
+
+    const img = document.createElement("img");
+
+    img.src = record._localUrl || (record.blob ? URL.createObjectURL(record.blob) : "");
+
+    bubble.appendChild(img);
+
+  } else if (record.kind === "video"){
+
+    const v = document.createElement("video");
+
+    v.src = record._localUrl || (record.blob ? URL.createObjectURL(record.blob) : "");
+
+    v.controls = true;
+
+    bubble.appendChild(v);
+
+  } else if (record.kind === "audio"){
+
+    const a = document.createElement("audio");
+
+    a.src = record._localUrl || (record.blob ? URL.createObjectURL(record.blob) : "");
+
+    a.controls = true;
+
+    bubble.appendChild(a);
+
+  }
+
+  row.appendChild(bubble);
+
+
+
+  const meta = document.createElement("div");
+
+  meta.className = "meta-line";
+
+  const statusLabel = record.status === "sending" ? "Envoi…" : record.status === "failed" ? "Échec" : record.status === "sent" ? "Envoyé" : "";
+
+  meta.innerHTML = `<span>${fmtTime(record.ts)}</span>` + (statusLabel ? ` <span class="${record.status==='failed'?'fail':''}">${statusLabel}</span>` : "");
+
+  if (record.status === "failed" && record.from === "me"){
+
+    const retry = document.createElement("button");
+
+    retry.textContent = "Réessayer";
+
+    retry.onclick = () => retrySend(record);
+
+    meta.appendChild(retry);
+
+  }
+
+  row.appendChild(meta);
+
+
+
+  if (record.kind !== "text" && (record.status === "sending")){
+
+    const prog = document.createElement("div");
+
+    prog.className = "progress-wrap";
+
+    prog.innerHTML = `<div class="progress-bar" style="width:${record.progress||0}%"></div>`;
+
+    row.appendChild(prog);
+
+  }
+
+
+
+  $("messages").appendChild(row);
+
+  $("messages").scrollTop = $("messages").scrollHeight;
+
+}
+
+function updateProgress(id, pct, isIncoming, transfer){
+
+  let row = document.querySelector(`[data-id="${CSS.escape(id)}"]`);
+
+  if (!row && isIncoming){
+
+    maybeDaySeparator(Date.now());
+
+    row = document.createElement("div");
+
+    row.className = "msg-row peer";
+
+    row.dataset.id = id;
+
+    row.innerHTML = `<div class="bubble">Réception d'un fichier…</div>`;
+
+    const prog = document.createElement("div");
+
+    prog.className = "progress-wrap";
+
+    prog.innerHTML = `<div class="progress-bar" style="width:0%"></div>`;
+
+    row.appendChild(prog);
+
+    $("messages").appendChild(row);
+
+  }
+
+  if (row){
+
+    const bar = row.querySelector(".progress-bar");
+
+    if (bar) bar.style.width = pct + "%";
+
+  }
+
+}
+
+function removePendingBubble(id){
+
+  const el = document.querySelector(`[data-id="${CSS.escape(id)}"]`);
+
+  if (el) el.remove();
+
+}
+
+function updateMessageStatus(record){
+
+  const row = document.querySelector(`[data-id="${CSS.escape(record.id)}"]`);
+
+  if (!row) return;
+
+  const meta = row.querySelector(".meta-line");
+
+  if (meta){
+
+    const statusLabel = record.status === "sending" ? "Envoi…" : record.status === "failed" ? "Échec" : "Envoyé";
+
+    meta.innerHTML = `<span>${fmtTime(record.ts)}</span> <span class="${record.status==='failed'?'fail':''}">${statusLabel}</span>`;
+
+    if (record.status === "failed"){
+
+      const retry = document.createElement("button");
+
+      retry.textContent = "Réessayer";
+
+      retry.onclick = () => retrySend(record);
+
+      meta.appendChild(retry);
+
+    }
+
+  }
+
+  if (record.status !== "sending"){
+
+    const prog = row.querySelector(".progress-wrap");
+
+    if (prog) prog.remove();
+
+  }
+
+}
+
+async function retrySend(record){
+
+  if (record.kind === "text"){
+
+    await Store.delete("messages", record.id);
+
+    document.querySelector(`[data-id="${CSS.escape(record.id)}"]`)?.remove();
+
+    await sendTextMessage(record.text);
+
+  } else {
+
+    pushSystemLine("Veuillez renvoyer le fichier depuis le trombone.", false);
+
+  }
+
+}
+
+async function loadHistory(){
+
+  lastDayRendered = null;
+
+  $("messages").innerHTML = "";
+
+  const all = await Store.allByConv(State.convId);
+
+  all.sort((a,b)=>a.ts-b.ts);
+
+  for (const m of all) renderMessage(m);
+
+}
+
+async function renderAllFromStore(){ await loadHistory(); }
+
+
+
+/* ======================= QR CODE ======================= */
+
+function showQr(link){
+
+  const holder = $("qrHolder");
+
+  holder.innerHTML = "";
+
+  holder.classList.remove("hidden");
+
+  new QRCode(holder, { text: link, width: 180, height: 180, colorDark:"#22231F", colorLight:"#ffffff" });
+
+}
+
+
+
+/* ======================= ÉVÉNEMENTS UI ======================= */
+
+$("btnCreate").addEventListener("click", createConversation);
+
+$("btnJoin").addEventListener("click", () => {
+
+  const v = $("joinInput").value.trim();
+
+  if (!v){ return; }
+
+  joinFromLink(v);
+
+});
+
+$("btnCancelInvite").addEventListener("click", () => { location.reload(); });
+
+$("btnCancelJoin").addEventListener("click", () => { location.reload(); });
+
+
+
+$("btnCopyInvite").addEventListener("click", async () => {
+
+  const link = $("inviteLinkBox").textContent;
+
+  try{ await navigator.clipboard.writeText(link); $("btnCopyInvite").textContent = "Lien copié"; }
+
+  catch(e){ /* presse-papiers indisponible : le lien reste affiché pour copie manuelle */ }
+
+});
+
+$("btnShareInvite").addEventListener("click", async () => {
+
+  const link = $("inviteLinkBox").textContent;
+
+  try{ await navigator.share({ title:"Rejoindre ma conversation Confidant", url: link }); } catch(e){}
+
+});
+
+$("btnShowQr").addEventListener("click", () => showQr($("inviteLinkBox").textContent));
+
+
+
+$("btnSend").addEventListener("click", () => {
+
+  const v = $("textInput").value;
+
+  if (!v.trim()) return;
+
+  $("textInput").value = "";
+
+  $("textInput").style.height = "auto";
+
+  sendTextMessage(v);
+
+});
+
+$("textInput").addEventListener("keydown", (e) => {
+
+  if (e.key === "Enter" && !e.shiftKey){ e.preventDefault(); $("btnSend").click(); }
+
+});
+
+$("textInput").addEventListener("input", (e) => {
+
+  e.target.style.height = "auto";
+
+  e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
+
+});
+
+
+
+$("btnAttach").addEventListener("click", () => $("fileInput").click());
+
+$("fileInput").addEventListener("change", (e) => {
+
+  const file = e.target.files[0];
+
+  if (!file) return;
+
+  const kind = file.type.startsWith("video/") ? "video" : "image";
+
+  sendFile(file, kind);
+
+  e.target.value = "";
+
+});
+
+
+
+let recording = false;
+
+$("btnRecord").addEventListener("click", () => {
+
+  recording = !recording;
+
+  if (recording) startRecording(); else stopRecording();
+
+});
+
+
+
+$("btnSettings").addEventListener("click", () => $("settingsOverlay").classList.remove("hidden"));
+
+$("btnCloseSettings").addEventListener("click", () => $("settingsOverlay").classList.add("hidden"));
+
+$("ttlSelect").addEventListener("change", async (e) => {
+
+  State.ttlMs = parseInt(e.target.value, 10);
+
+  const conv = await Store.get("conversations", State.convId);
+
+  if (conv){ conv.ttlMs = State.ttlMs; await Store.put("conversations", conv); }
+
+});
+
+$("btnClearHistory").addEventListener("click", async () => {
+
+  if (!confirm("Effacer tout l'historique local de cette conversation ? Cette action est irréversible sur cet appareil.")) return;
+
+  await Store.clearConversationMessages(State.convId);
+
+  await loadHistory();
+
+  if (State.peerConnected){ try{ State.conn.send({ t:"delete-request", scope:"all" }); }catch(e){} }
+
+  $("settingsOverlay").classList.add("hidden");
+
+});
+
+$("btnDeleteConv").addEventListener("click", async () => {
+
+  if (!confirm("Supprimer définitivement cette conversation sur cet appareil ?")) return;
+
+  if (State.peerConnected){ try{ State.conn.send({ t:"delete-request", scope:"all" }); }catch(e){} }
+
+  await Store.deleteConversation(State.convId);
+
+  if (State.conn) try{ State.conn.close(); }catch(e){}
+
+  if (State.peer) try{ State.peer.destroy(); }catch(e){}
+
+  location.reload();
+
+});
+
+
+
+window.addEventListener("beforeunload", () => {
+
+  try{ if (State.conn) State.conn.close(); }catch(e){}
+
+  try{ if (State.peer) State.peer.destroy(); }catch(e){}
+
+});
+
+
+
+/* ======================= DÉMARRAGE ======================= */
+
+(async function init(){
+
+  await Store.cleanupExpired();
+
+  if (location.hash && location.hash.includes("id=")){
+
+    joinFromLink(location.href);
+
+  }
+
+})();
+
+
+
+})();
+
+</script>
+
+</body>
+
+</html>
