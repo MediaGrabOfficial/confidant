@@ -47,7 +47,7 @@
 
   *{box-sizing:border-box;}
 
-  html,body{height:100%;}
+  html,body{height:100%; min-height:100%;}
 
   body{
 
@@ -75,9 +75,9 @@
 
   /* ---------- Shell ---------- */
 
-  #app{ max-width:560px; margin:0 auto; min-height:100%; display:flex; flex-direction:column; }
+  #app{ max-width:560px; margin:0 auto; min-height:100%; min-height:100dvh; display:flex; flex-direction:column; }
 
-  .screen{ flex:1; display:flex; flex-direction:column; min-height:100vh; }
+  .screen{ flex:1; display:flex; flex-direction:column; min-height:100vh; min-height:100dvh; }
 
   .top{
 
@@ -167,7 +167,7 @@
 
   /* ---------- Chat ---------- */
 
-  #chatScreen{ min-height:100vh; }
+  #chatScreen{ min-height:100vh; min-height:100dvh; height:100vh; height:100dvh; }
 
   .chat-header{
 
@@ -189,7 +189,7 @@
 
   .icon-btn:hover{ background:var(--surface-2); }
 
-  .messages{ flex:1; overflow-y:auto; padding:16px 14px 90px; display:flex; flex-direction:column; gap:10px; }
+  .messages{ flex:1; min-height:0; overflow-y:auto; padding:16px 14px calc(104px + env(safe-area-inset-bottom, 0px)); display:flex; flex-direction:column; gap:10px; overscroll-behavior:contain; }
 
   .day-sep{ text-align:center; color:var(--text-2); font-size:11px; margin:10px 0 2px; }
 
@@ -227,7 +227,7 @@
 
   .composer{
 
-    position:fixed; bottom:0; left:0; right:0;
+    position:fixed; bottom:var(--keyboard-bottom, 0px); left:0; right:0;
 
     display:flex; justify-content:center;
 
@@ -235,11 +235,11 @@
 
   }
 
-  .composer-inner{ width:100%; max-width:560px; display:flex; align-items:flex-end; gap:6px; padding:10px 12px; }
+  .composer-inner{ width:100%; max-width:560px; display:flex; align-items:flex-end; gap:6px; padding:10px 12px calc(10px + env(safe-area-inset-bottom, 0px)); }
 
   .composer textarea{
 
-    flex:1; resize:none; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface);
+    flex:1; min-width:0; resize:none; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface);
 
     padding:10px 12px; max-height:120px; min-height:40px;
 
@@ -250,6 +250,12 @@
   .progress-wrap{ width:160px; height:3px; background:var(--surface-2); border-radius:2px; overflow:hidden; margin-top:4px; }
 
   .progress-bar{ height:100%; background:var(--olive); width:0%; }
+
+  .scanner-overlay{ position:fixed; inset:0; z-index:50; background:rgba(34,35,31,.78); display:flex; align-items:center; justify-content:center; padding:18px; }
+  .scanner-card{ width:min(100%, 420px); background:var(--bg); border:1px solid var(--border); padding:18px; display:flex; flex-direction:column; gap:12px; }
+  .scanner-video{ display:block; width:100%; aspect-ratio:3/4; max-height:58dvh; object-fit:cover; background:#171814; }
+  .scanner-hint{ color:var(--text-2); font-size:13px; }
+  @media(max-height:560px){ .scanner-video{ aspect-ratio:16/9; max-height:42dvh; } }
 
 
 
@@ -312,6 +318,7 @@
       <div class="home-actions">
 
         <button class="btn btn-primary" id="btnCreate">Créer une conversation</button>
+        <button class="btn" id="btnScanInvite">Scanner un QR code</button>
 
       </div>
 
@@ -333,7 +340,7 @@
 
     <div class="foot-note">
 
-      Aucun message en clair ne transite par un serveur. La connexion directe entre vos deux appareils peut être bloquée par certains réseaux (écoles, entreprises) — voir les limites en bas de la conversation.
+      Aucun serveur ne lit le contenu de vos messages.
 
     </div>
 
@@ -417,12 +424,13 @@
       <button class="icon-btn chat-back" id="btnBackList" aria-label="Retour à mes conversations">‹</button>
       <div class="chat-header-left">
 
-        <div class="chat-title">Conversation privée</div>
+        <div class="chat-title" id="chatTitle">Conversation privée</div>
 
         <div class="chat-status"><span id="chatStatusDot" class="status-dot connecting"></span><span id="chatStatusText">Connexion…</span></div>
 
       </div>
 
+      <button class="icon-btn hidden" id="btnChatInvite" aria-label="Invitation et QR code">▦</button>
       <button class="icon-btn" id="btnSettings" aria-label="Réglages">⋯</button>
 
     </div>
@@ -489,6 +497,8 @@
 
     <div class="row">
 
+      <button class="btn" id="btnEnableNotifications" style="border:1px solid var(--border);">Activer les notifications</button>
+      <div class="limits-note">Les notifications arrivent quand Confidant est ouvert et que la connexion revient. Sans serveur de relais de messages, un téléphone complètement déconnecté ne peut pas recevoir instantanément.</div>
       <button class="btn" id="btnClearHistory" style="border:1px solid var(--border);">Effacer l'historique local</button>
 
       <button class="btn btn-danger" id="btnDeleteConv">Supprimer la conversation</button>
@@ -497,11 +507,7 @@
 
     </div>
 
-    <div class="limits-note">
-
-      Limites : images ≤ 8 Mo, vidéos ≤ 15 Mo, messages vocaux ≤ 10 Mo. La suppression automatique efface les données de cet appareil ; une copie prise par votre correspondant (capture d'écran, export) ne peut pas être effacée à distance. Le nettoyage s'exécute à l'ouverture de l'application et périodiquement tant qu'elle reste ouverte — s'il manque un lancement, le nettoyage se fait au suivant.
-
-    </div>
+    <div class="limits-note">La suppression automatique concerne cet appareil uniquement. Une capture d’écran ou une copie déjà enregistrée ailleurs ne peut pas être effacée à distance.</div>
 
   </div>
 
@@ -509,9 +515,20 @@
 
 
 
+<div id="scannerOverlay" class="scanner-overlay hidden" role="dialog" aria-modal="true" aria-label="Scanner une invitation">
+  <div class="scanner-card">
+    <div class="wordmark">Scanner une invitation</div>
+    <video id="scannerVideo" class="scanner-video" autoplay muted playsinline></video>
+    <canvas id="scannerCanvas" class="hidden"></canvas>
+    <div id="scannerHint" class="scanner-hint">Placez le QR code dans le cadre. La caméra reste utilisée uniquement pendant le scan.</div>
+    <button class="btn btn-ghost" id="btnStopScanner" style="border:1px solid var(--border);">Annuler</button>
+  </div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.min.js"></script>
 
 <script>
 
@@ -924,6 +941,8 @@ const State = {
 
   convId: null,
 
+  conversationName: "Conversation privée",
+
   role: null,            // 'creator' | 'joiner'
 
   keyPair: null,
@@ -992,6 +1011,10 @@ function saveConversationPatch(convId, patch){
     const conv = await Store.get("conversations", convId);
     if (!conv) return null;
     Object.assign(conv, patch);
+    if (State.convId === convId && patch.name) {
+      State.conversationName = conv.name;
+      $("chatTitle").textContent = conv.name;
+    }
     await Store.put("conversations", conv);
     await refreshConversationList();
     return conv;
@@ -1116,6 +1139,9 @@ async function resumeConversation(convId){
   teardownActiveSession();
   State.convId = conv.id;
   State.role = conv.role;
+  State.conversationName = conv.name || "Conversation privée";
+  $("chatTitle").textContent = State.conversationName;
+  $("btnChatInvite").classList.toggle("hidden", State.role !== "creator");
   State.myId = conv.localPeerId || conv.peerId || null;
   State.remotePeerId = conv.remotePeerId || null;
   State.myPubB64 = conv.myPubB64 || null;
@@ -1139,12 +1165,13 @@ async function resumeConversation(convId){
     return;
   }
 
+  showScreen("chatScreen");
+  updateChatStatus("disconnected", "Hors ligne · messages en attente");
   if (State.role === "creator") {
-    showScreen("inviteScreen");
-    $("inviteError").classList.add("hidden");
-    setInviteStatus("waiting", "Réouverture de l'invitation…");
+    $("inviteLinkBox").textContent = buildInviteLink();
+    $("btnShareInvite").classList.toggle("hidden", !navigator.share);
+    setInviteStatus("waiting", "Invitation prête à partager");
   } else {
-    showScreen("chatScreen");
     updateChatStatus("connecting", "Connexion en cours…");
   }
   startPeerForActiveConversation(true);
@@ -1161,7 +1188,7 @@ function startPeerForActiveConversation(isResume){
       $("inviteLinkBox").textContent = buildInviteLink();
       $("btnShareInvite").classList.toggle("hidden", !navigator.share);
       setInviteStatus("waiting", "En attente du destinataire…");
-      if ($("chatScreen").classList.contains("hidden")) showScreen("inviteScreen");
+      if (!isResume) showScreen("inviteScreen");
       await saveConversationPatch(boundConvId, {connectionStatus:"waiting", lastActivity:Date.now()});
     } else {
       if (!State.remotePeerId) {
@@ -1233,6 +1260,11 @@ function scheduleReconnect(convId, signalingLost){
       setTimeout(() => {
         if (State.convId !== convId || State.peer !== peer || State.peerConnected || peer.destroyed) return;
         if (State.conn && State.conn.open) return;
+        if (State.conn) {
+          const previousConn = State.conn;
+          State.conn = null;
+          try { previousConn.close(); } catch (e) {}
+        }
         try {
           const conn = peer.connect(State.remotePeerId, {reliable:true});
           State.conn = conn;
@@ -1254,12 +1286,18 @@ function makePeer(id){
 /* ---------- Création d'une conversation ---------- */
 
 async function createConversation(){
+  const chosenName = prompt("Nom de la conversation", "Conversation privée");
+  if (chosenName === null) return;
+  const conversationName = chosenName.trim().slice(0,64) || "Conversation privée";
   teardownActiveSession();
   showScreen("inviteScreen");
   $("inviteError").classList.add("hidden");
   setInviteStatus("connecting", "Génération des clés…");
 
   State.role = "creator";
+  State.conversationName = conversationName;
+  $("chatTitle").textContent = conversationName;
+  $("btnChatInvite").classList.remove("hidden");
   State.convId = randomId(12);
   State.keyPair = await Crypto.genKeyPair();
   State.myPubB64 = await Crypto.exportPub(State.keyPair.publicKey);
@@ -1279,7 +1317,7 @@ async function createConversation(){
       remotePeerId:null, privateKey:State.keyPair.privateKey, publicKey:State.keyPair.publicKey,
       myPubB64:State.myPubB64, theirPubB64:null, ttlMs:State.ttlMs,
       createdAt:now, lastActivity:now, lastMessage:"Invitation créée", connectionStatus:"waiting",
-      sendCounter:0, recvCounter:-1, name:"Nouvelle conversation"
+      sendCounter:0, recvCounter:-1, name:conversationName
     });
   } catch (e) {
     showInviteError("Ce navigateur n'a pas pu conserver les clés de reprise dans IndexedDB.");
@@ -1295,10 +1333,27 @@ function buildInviteLink(){
 
   const url = new URL(location.href);
 
-  url.hash = `id=${encodeURIComponent(State.myId)}&pub=${encodeURIComponent(State.myPubB64)}&cv=${encodeURIComponent(State.convId)}`;
+  url.hash = `id=${encodeURIComponent(State.myId)}&pub=${encodeURIComponent(State.myPubB64)}&cv=${encodeURIComponent(State.convId)}&name=${encodeURIComponent(State.conversationName || "Conversation privée")}`;
 
   return url.toString();
 
+}
+
+function buildQrInviteLink(){
+  const inviteLink = new URL(buildInviteLink());
+  const params = new URLSearchParams(inviteLink.hash.replace(/^#/, ""));
+  inviteLink.hash = "";
+  inviteLink.search = params.toString();
+  const fallback = inviteLink.toString();
+  return "intent://" + inviteLink.host + inviteLink.pathname + inviteLink.search +
+    "#Intent;scheme=https;package=fr.confidant.app;S.browser_fallback_url=" +
+    encodeURIComponent(fallback) + ";end";
+}
+
+function normalizeInviteLink(value){
+  let link = String(value || "").trim();
+  if (/^intent:\/\//i.test(link)) link = link.replace(/^intent:/i, "https:").split("#Intent;")[0];
+  return link;
 }
 
 function setInviteStatus(kind, text){
@@ -1333,8 +1388,9 @@ async function joinFromLink(link){
 
   let url, hash;
   try {
-    url = new URL(link.trim());
+    url = new URL(normalizeInviteLink(link));
     hash = new URLSearchParams(url.hash.replace(/^#/, ""));
+    if (!hash.has("id")) hash = url.searchParams;
   } catch (e) {
     showJoinError("Ce lien n'est pas valide.");
     return;
@@ -1343,6 +1399,7 @@ async function joinFromLink(link){
   const peerId = hash.get("id");
   const theirPubB64 = hash.get("pub");
   const convId = hash.get("cv");
+  const inviteName = (hash.get("name") || "Conversation privée").trim().slice(0,64) || "Conversation privée";
   if (!peerId || !theirPubB64 || !convId ||
       !/^[-A-Za-z0-9_]+$/.test(peerId) || !/^[-A-Za-z0-9_]+$/.test(convId)) {
     showJoinError("Invitation incomplète ou invalide.");
@@ -1382,14 +1439,22 @@ async function joinFromLink(link){
       remotePeerId:peerId, privateKey:State.keyPair.privateKey, publicKey:State.keyPair.publicKey,
       myPubB64:State.myPubB64, theirPubB64:State.theirPubB64, ttlMs:State.ttlMs,
       createdAt:now, lastActivity:now, lastMessage:"Invitation acceptée", connectionStatus:"connecting",
-      sendCounter:0, recvCounter:-1, name:"Nouvelle conversation"
+      sendCounter:0, recvCounter:-1, name:inviteName
     });
   } catch (e) {
     showJoinError("Ce navigateur n'a pas pu conserver les clés de reprise dans IndexedDB.");
     return;
   }
 
-  try { history.replaceState(null, "", url.pathname + url.search); } catch (e) {}
+  State.conversationName = inviteName;
+  $("chatTitle").textContent = inviteName;
+  $("btnChatInvite").classList.add("hidden");
+  try {
+    const cleanUrl = new URL(url.href);
+    cleanUrl.hash = "";
+    ["id","pub","cv","name"].forEach(k => cleanUrl.searchParams.delete(k));
+    history.replaceState(null, "", cleanUrl.pathname + cleanUrl.search);
+  } catch (e) {}
   setLastConversation(State.convId);
   await refreshConversationList();
   setJoinStatus("connecting", "Connexion au service de signalisation…");
@@ -1451,10 +1516,11 @@ function wireConnection(conn, isCreator){
     if (State.convId === boundConvId && State.conn === conn) handleIncoming(msg,isCreator,conn);
   });
   conn.on("close", async () => {
-    if (State.convId !== boundConvId) return;
-    if (State.conn === conn) State.conn = null;
+    if (State.convId !== boundConvId || State.conn !== conn) return;
+    State.conn = null;
     State.peerConnected = false; State.sessionKey = null; State.incomingTransfers = new Map();
     try { await requeueUnconfirmedTexts(boundConvId); } catch(e) {}
+    try { await requeueUnconfirmedFiles(boundConvId); } catch(e) {}
     saveConversationPatch(boundConvId,{connectionStatus:"offline",lastActivity:Date.now()}).catch(()=>{});
     if (State.role === "creator") {
       setInviteStatus("waiting","Déconnecté — invitation toujours valable");
@@ -1466,7 +1532,7 @@ function wireConnection(conn, isCreator){
     }
   });
   conn.on("error", () => {
-    if (State.convId !== boundConvId) return;
+    if (State.convId !== boundConvId || State.conn !== conn) return;
     State.peerConnected = false; State.sessionKey = null;
     updateChatStatus("error","Erreur de connexion"); scheduleReconnect(boundConvId,false);
   });
@@ -1530,10 +1596,20 @@ async function finalizeSession(){
 
 async function requeueUnconfirmedTexts(convId){
   const messages=await Store.allByConv(convId);
-  for (const record of messages) {
-    if (record.from==="me" && record.kind==="text" && ["sending","sent"].includes(record.status)) {
-      record.status="queued"; await Store.put("messages",record);
-      if (State.convId===convId) updateMessageStatus(record);
+  for(const record of messages){
+    if(record.from==="me" && record.kind==="text" && ["sending","sent"].includes(record.status)){
+      record.status="queued";await Store.put("messages",record);
+      if(State.convId===convId) updateMessageStatus(record);
+    }
+  }
+}
+
+async function requeueUnconfirmedFiles(convId){
+  const messages=await Store.allByConv(convId);
+  for(const record of messages){
+    if(record.from==="me" && ["image","video","audio"].includes(record.kind) && ["sending","sent"].includes(record.status)){
+      record.status="queued";await Store.put("messages",record);
+      if(State.convId===convId) updateMessageStatus(record);
     }
   }
 }
@@ -1544,6 +1620,44 @@ function updateChatStatus(kind, text){
 
   $("chatStatusText").textContent = text;
 
+}
+
+let notificationAudioContext = null;
+let notificationRegistration = null;
+
+function playMessageSound(){
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    notificationAudioContext = notificationAudioContext || new AudioContextClass();
+    if (notificationAudioContext.state === "suspended") notificationAudioContext.resume();
+    const oscillator = notificationAudioContext.createOscillator();
+    const gain = notificationAudioContext.createGain();
+    oscillator.type = "sine";
+    oscillator.frequency.value = 660;
+    gain.gain.setValueAtTime(0.0001, notificationAudioContext.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.055, notificationAudioContext.currentTime + 0.025);
+    gain.gain.exponentialRampToValueAtTime(0.0001, notificationAudioContext.currentTime + 0.22);
+    oscillator.connect(gain); gain.connect(notificationAudioContext.destination);
+    oscillator.start(); oscillator.stop(notificationAudioContext.currentTime + 0.23);
+  } catch (e) {}
+}
+
+async function notifyIncomingMessage(body){
+  try {
+    if (localStorage.getItem("confidant.notifications") !== "yes") return;
+    playMessageSound();
+    if (window.ConfidantAndroid && typeof window.ConfidantAndroid.notifyMessage === "function") {
+      window.ConfidantAndroid.notifyMessage("Confidant", String(body || "Nouveau message"));
+      return;
+    }
+    if ("Notification" in window && Notification.permission === "granted") {
+      const options = {body:String(body || "Nouveau message"), tag:"confidant-" + (State.convId || "message"), renotify:true};
+      if (notificationRegistration && notificationRegistration.showNotification) {
+        await notificationRegistration.showNotification("Confidant", options);
+      } else new Notification("Confidant", options);
+    }
+  } catch (e) {}
 }
 
 
@@ -1583,13 +1697,16 @@ async function transmitTextRecord(record){
 }
 
 async function flushQueuedMessages(){
-  if (!State.convId || !State.peerConnected || !State.sessionKey) return;
+  if(!State.convId || !State.peerConnected || !State.sessionKey) return;
   const convId=State.convId, list=await Store.allByConv(convId);
   list.sort((a,b)=>a.ts-b.ts);
-  for (const record of list) {
-    if (State.convId!==convId || !State.peerConnected) return;
-    if (record.from==="me" && record.kind==="text" && ["queued","sent"].includes(record.status)) {
+  for(const record of list){
+    if(State.convId!==convId || !State.peerConnected) return;
+    if(record.from!=="me") continue;
+    if(record.kind==="text" && ["queued","sent"].includes(record.status)){
       await transmitTextRecord(record);
+    } else if(["image","video","audio"].includes(record.kind) && record.status==="queued"){
+      await transmitFileRecord(record);
     }
   }
 }
@@ -1638,7 +1755,9 @@ async function receiveTextMessage(msg){
   await Store.put("messages",record);
   await saveConversationPatch(State.convId,{recvCounter:State.recvCounter,
     lastMessage:"Correspondant : "+content.replace(/\s+/g," ").slice(0,120),lastActivity:now,connectionStatus:"connected"});
-  renderMessage(record); await sendMessageAck(record.id,msg.sender);
+  renderMessage(record);
+  await notifyIncomingMessage(content.length > 90 ? content.slice(0,87) + "…" : content);
+  await sendMessageAck(record.id,msg.sender);
 }
 
 async function sendEncryptedControl(payload){
@@ -1695,99 +1814,65 @@ function maxForKind(kind){
 
 
 async function sendFile(file, kind){
-
-  if (!State.peerConnected){ pushSystemLine("Pas de connexion active : envoi impossible.", true); return; }
-
-  const max = maxForKind(kind);
-
-  if (file.size > max){
-
-    pushSystemLine(`Fichier trop volumineux (max ${(max/1024/1024).toFixed(0)} Mo).`, true);
-
-    return;
-
-  }
-
-  const buf = await file.arrayBuffer();
-
-  const total = Math.ceil(buf.byteLength / CHUNK_SIZE) || 1;
-
-  const transferId = randomId(9);
-
-  const id = State.convId + "-" + State.myId + "-f-" + transferId;
-
-
-
-  const localUrl = URL.createObjectURL(file);
-
-  const record = {
-
-    id, convId: State.convId, from:"me", kind, mime:file.type, transferId:transferId, ts: Date.now(),
-
-    expiresAt: Date.now()+State.ttlMs, status:"sending", progress:0, _localUrl: localUrl
-
-  };
-
+  if (!State.convId || !State.myId) { pushSystemLine("Ouvrez une conversation avant d’envoyer un fichier.", true); return; }
+  const max=maxForKind(kind);
+  if(file.size>max){ pushSystemLine(`Fichier trop volumineux (max ${(max/1024/1024).toFixed(0)} Mo).`,true); return; }
+  const transferId=randomId(9);
+  const id=State.convId+"-"+State.myId+"-f-"+transferId;
+  const now=Date.now();
+  const localUrl=URL.createObjectURL(file);
+  const record={id,convId:State.convId,from:"me",kind,mime:file.type,transferId,ts:now,
+    expiresAt:now+State.ttlMs,status:State.peerConnected?"sending":"queued",progress:0,_localUrl:localUrl};
+  const stored={...record,_localUrl:undefined,blob:file};
+  try { await Store.put("messages",stored); }
+  catch(e) { URL.revokeObjectURL(localUrl); pushSystemLine("Espace de stockage insuffisant sur cet appareil pour conserver ce fichier.",true); return; }
   renderMessage(record);
-
-
-
-  // on stocke le fichier déchiffré localement (c'est NOTRE copie) pour
-
-  // l'historique local ; il reste protégé par l'éventuel verrou local.
-
-  const blobCopy = file.slice(0,0).type ? file : file; // conserve le Blob d'origine
-
-  await Store.put("messages", { ...record, _localUrl: undefined, blob: file });
-
-
-
-  let sentBytes = 0;
-
-  for (let i=0; i<total; i++){
-
-    const start = i*CHUNK_SIZE, end = Math.min(start+CHUNK_SIZE, buf.byteLength);
-
-    const chunkBytes = new Uint8Array(buf.slice(start, end));
-
-    const aad = `${State.convId}|${transferId}|${i}|${total}|${kind}`;
-
-    const { iv, ct } = await Crypto.encrypt(State.sessionKey, aad, chunkBytes);
-
-    try{
-
-      State.conn.send({ t:"chunk", transferId, index:i, total, kind, mime:file.type, iv, ct, size: buf.byteLength });
-
-    } catch(e){
-
-      record.status = "failed";
-
-      updateMessageStatus(record);
-
-      return;
-
-    }
-
-    sentBytes = end;
-
-    updateProgress(id, Math.round(sentBytes/buf.byteLength*100));
-
-    // laisse respirer la boucle d'événements pour l'UI et le canal
-
-    await new Promise(r => setTimeout(r, 0));
-
+  await saveConversationPatch(State.convId,{
+    lastMessage:kind==="image"?"Vous : photo":kind==="video"?"Vous : vidéo":"Vous : message vocal",
+    lastActivity:now
+  });
+  if(!State.peerConnected){
+    pushSystemLine("Fichier conservé dans la file d’envoi. Il partira quand la connexion reviendra.",false);
+    return;
   }
-
-  record.status = "sent";
-
-  record.progress = 100;
-
-  await Store.put("messages", { ...record, _localUrl: undefined, blob: file });
-  updateMessageStatus(record);
-
+  await transmitFileRecord(stored,file);
 }
 
-
+async function transmitFileRecord(record,fileOverride){
+  const convId=record.convId, conn=State.conn, key=State.sessionKey;
+  const file=fileOverride || record.blob;
+  if(!file || !State.peerConnected || !conn || !key || State.convId!==convId){
+    record.status="queued"; await Store.put("messages",record); updateMessageStatus(record); return;
+  }
+  record.status="sending"; await Store.put("messages",record); updateMessageStatus(record);
+  let buffer;
+  try { buffer=await file.arrayBuffer(); }
+  catch(e){record.status="queued";await Store.put("messages",record);updateMessageStatus(record);return;}
+  const max=maxForKind(record.kind);
+  if(buffer.byteLength>max){record.status="failed";await Store.put("messages",record);updateMessageStatus(record);return;}
+  const total=Math.ceil(buffer.byteLength/CHUNK_SIZE)||1;
+  for(let i=0;i<total;i++){
+    if(State.convId!==convId || State.conn!==conn || !State.peerConnected){
+      record.status="queued";await Store.put("messages",record);updateMessageStatus(record);return;
+    }
+    const start=i*CHUNK_SIZE,end=Math.min(start+CHUNK_SIZE,buffer.byteLength);
+    const bytes=new Uint8Array(buffer.slice(start,end));
+    const aad=convId+"|"+record.transferId+"|"+i+"|"+total+"|"+record.kind;
+    try{
+      const encrypted=await Crypto.encrypt(key,aad,bytes);
+      if(State.convId!==convId || State.conn!==conn || !State.peerConnected){
+        record.status="queued";await Store.put("messages",record);updateMessageStatus(record);return;
+      }
+      conn.send({t:"chunk",transferId:record.transferId,index:i,total,kind:record.kind,mime:record.mime,
+        iv:encrypted.iv,ct:encrypted.ct,size:buffer.byteLength});
+    }catch(e){record.status="queued";await Store.put("messages",record);updateMessageStatus(record);return;}
+    record.progress=Math.round(end/buffer.byteLength*100);
+    updateProgress(record.id,record.progress);
+    await new Promise(resolve=>setTimeout(resolve,0));
+  }
+  record.status="sent";record.progress=100;
+  await Store.put("messages",record);updateMessageStatus(record);
+}
 
 async function receiveChunk(msg){
   const {transferId,index,total,kind,mime,iv,ct,size}=msg, max=maxForKind(kind);
@@ -1826,11 +1911,18 @@ async function receiveChunk(msg){
     const blob=new Blob([full],{type:transfer.mime||"application/octet-stream"});
     State.incomingTransfers.delete(transferId);
     const id=State.convId+"-peer-f-"+transferId, now=Date.now();
+    const existing=await Store.get("messages",id);
+    if(existing){
+      removePendingBubble(State.convId+"-recv-"+transferId);
+      await sendEncryptedControl({type:"file-received",transferId:transferId});
+      return;
+    }
     const record={id:id,convId:State.convId,from:"peer",kind:transfer.kind,mime:transfer.mime,transferId:transferId,
       ts:now,expiresAt:now+State.ttlMs,status:"received",blob:blob};
     await Store.put("messages",record);
     await saveConversationPatch(State.convId,{lastMessage:transfer.kind==="image"?"Photo reçue":transfer.kind==="video"?"Vidéo reçue":"Message vocal reçu",lastActivity:now});
     removePendingBubble(State.convId+"-recv-"+transferId); renderMessage(record);
+    await notifyIncomingMessage(transfer.kind === "image" ? "Nouvelle photo" : transfer.kind === "video" ? "Nouvelle vidéo" : "Nouveau message vocal");
     await sendEncryptedControl({type:"file-received",transferId:transferId});
   }
 }
@@ -2191,15 +2283,10 @@ async function renderAllFromStore(){ await loadHistory(); }
 /* ======================= QR CODE ======================= */
 
 function showQr(link){
-
   const holder = $("qrHolder");
-
   holder.innerHTML = "";
-
   holder.classList.remove("hidden");
-
-  new QRCode(holder, { text: link, width: 180, height: 180, colorDark:"#22231F", colorLight:"#ffffff" });
-
+  new QRCode(holder, { text: link || buildQrInviteLink(), width: 220, height: 220, colorDark:"#22231F", colorLight:"#ffffff" });
 }
 
 
@@ -2207,11 +2294,85 @@ function showQr(link){
 /* ======================= ÉVÉNEMENTS UI ======================= */
 
 $("btnCreate").addEventListener("click", createConversation);
+
+let scannerStream = null, scannerRaf = 0, scannerBusy = false;
+
+function stopQrScanner(){
+  if (scannerRaf) cancelAnimationFrame(scannerRaf);
+  scannerRaf = 0; scannerBusy = false;
+  if (scannerStream) scannerStream.getTracks().forEach(track => track.stop());
+  scannerStream = null;
+  $("scannerVideo").srcObject = null;
+  $("scannerOverlay").classList.add("hidden");
+}
+
+async function startQrScanner(){
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    $("scannerOverlay").classList.remove("hidden");
+    $("scannerHint").textContent = "Caméra indisponible. Ouvrez Confidant dans l’application ou dans un navigateur compatible."; return;
+  }
+  $("scannerOverlay").classList.remove("hidden");
+  $("scannerHint").textContent = "Autorisez la caméra puis présentez le QR code."; 
+  try {
+    scannerStream = await navigator.mediaDevices.getUserMedia({audio:false, video:{facingMode:{ideal:"environment"}, width:{ideal:1280}}});
+    $("scannerVideo").srcObject = scannerStream;
+    await $("scannerVideo").play();
+    let detector = null;
+    if ("BarcodeDetector" in window) { try { detector = new BarcodeDetector({formats:["qr_code"]}); } catch (e) {} }
+    const video=$("scannerVideo"), canvas=$("scannerCanvas"), context=canvas.getContext("2d",{willReadFrequently:true});
+    const scan = () => {
+      if (!scannerStream) return;
+      scannerRaf=requestAnimationFrame(scan);
+      if (scannerBusy || video.readyState<2 || !video.videoWidth) return;
+      scannerBusy=true;
+      (async()=>{
+        try {
+          let result=null;
+          if (detector) {
+            const codes=await detector.detect(video);
+            if (codes && codes.length) result=codes[0].rawValue;
+          } else if (window.jsQR) {
+            canvas.width=video.videoWidth; canvas.height=video.videoHeight;
+            context.drawImage(video,0,0,canvas.width,canvas.height);
+            const frame=context.getImageData(0,0,canvas.width,canvas.height);
+            const code=jsQR(frame.data,frame.width,frame.height,{inversionAttempts:"dontInvert"});
+            if (code) result=code.data;
+          } else {
+            $("scannerHint").textContent="Le lecteur QR ne s’est pas chargé. Rechargez la page puis réessayez.";
+            stopQrScanner(); return;
+          }
+          if (result) { stopQrScanner(); await joinFromLink(result); }
+        } catch (e) {
+          $("scannerHint").textContent="QR illisible pour le moment. Gardez le code bien éclairé et réessayez.";
+        } finally { scannerBusy=false; }
+      })();
+    };
+    scan();
+  } catch (e) {
+    if (scannerStream) scannerStream.getTracks().forEach(track=>track.stop());
+    scannerStream=null;
+    $("scannerOverlay").classList.remove("hidden");
+    $("scannerHint").textContent="Caméra refusée ou indisponible. Autorisez l’accès à la caméra dans les réglages du téléphone.";
+  }
+}
+
+$("btnScanInvite").addEventListener("click",startQrScanner);
+$("btnStopScanner").addEventListener("click",stopQrScanner);
+$("scannerOverlay").addEventListener("click",event=>{if(event.target===$("scannerOverlay")) stopQrScanner();});
+
 $("btnJoin").addEventListener("click", () => {
   const value = $("joinInput").value.trim();
   if (value) joinFromLink(value);
 });
 $("btnCancelInvite").addEventListener("click", exitToList);
+$("btnChatInvite").addEventListener("click", () => {
+  if (State.role !== "creator") return;
+  $("inviteLinkBox").textContent=buildInviteLink();
+  $("btnShareInvite").classList.toggle("hidden",!navigator.share);
+  $("qrHolder").classList.add("hidden"); $("inviteError").classList.add("hidden");
+  setInviteStatus("waiting",State.peerConnected?"Correspondant connecté":"Invitation prête à partager");
+  showScreen("inviteScreen");
+});
 $("btnViewHistory").addEventListener("click", async () => {
   showScreen("chatScreen");
   updateChatStatus(State.peerConnected ? "connected" : "disconnected",
@@ -2220,6 +2381,15 @@ $("btnViewHistory").addEventListener("click", async () => {
 });
 $("btnCancelJoin").addEventListener("click", exitToList);
 $("btnBackList").addEventListener("click", exitToList);
+
+function updateKeyboardInset(){
+  const vv=window.visualViewport; let inset=0;
+  if(vv){ const gap=window.innerHeight-vv.height-vv.offsetTop; if(gap>120) inset=gap; }
+  document.documentElement.style.setProperty("--keyboard-bottom",inset+"px");
+}
+window.addEventListener("resize",updateKeyboardInset);
+if(window.visualViewport){window.visualViewport.addEventListener("resize",updateKeyboardInset);window.visualViewport.addEventListener("scroll",updateKeyboardInset);}
+updateKeyboardInset();
 
 $("btnCopyInvite").addEventListener("click", async () => {
   const link = $("inviteLinkBox").textContent;
@@ -2231,7 +2401,7 @@ $("btnShareInvite").addEventListener("click", async () => {
   try { await navigator.share({title:"Rejoindre ma conversation Confidant", url:link}); } catch (e) {}
 });
 $("btnShowQr").addEventListener("click", () => {
-  try { showQr($("inviteLinkBox").textContent); }
+  try { showQr(buildQrInviteLink()); }
   catch (e) { showInviteError("La bibliothèque QR n'a pas été chargée. Vérifiez votre connexion."); }
 });
 
@@ -2264,6 +2434,25 @@ $("btnRecord").addEventListener("click", () => {
 });
 
 $("btnSettings").addEventListener("click", () => $("settingsOverlay").classList.remove("hidden"));
+$("btnEnableNotifications").addEventListener("click", async () => {
+  try {
+    localStorage.setItem("confidant.notifications","yes");
+    playMessageSound();
+    if (window.ConfidantAndroid && typeof window.ConfidantAndroid.requestNotifications === "function") {
+      localStorage.setItem("confidant.notifications","yes");
+      window.ConfidantAndroid.requestNotifications();
+      $("btnEnableNotifications").textContent="Notifications activées";
+      pushSystemLine("Notifications activées sur cet appareil quand Confidant reçoit un message connecté.",false); return;
+    }
+    if (!("Notification" in window)) { pushSystemLine("Ce navigateur ne prend pas en charge les notifications. Le son fonctionne lorsque la page est active.",true); return; }
+    const permission=await Notification.requestPermission();
+    if (permission==="granted") {
+      localStorage.setItem("confidant.notifications","yes");
+      $("btnEnableNotifications").textContent="Notifications activées";
+      pushSystemLine("Notifications activées sur ce navigateur.",false);
+    } else pushSystemLine("Les notifications sont bloquées dans les réglages du navigateur.",true);
+  } catch(e) { pushSystemLine("Impossible d’activer les notifications sur cet appareil.",true); }
+});
 $("btnCloseSettings").addEventListener("click", () => $("settingsOverlay").classList.add("hidden"));
 $("ttlSelect").addEventListener("change", async (event) => {
   State.ttlMs = parseInt(event.target.value, 10);
@@ -2302,8 +2491,9 @@ window.addEventListener("beforeunload", () => {
 (async function init(){
   try {
     await Store.cleanupExpired();
+    if (localStorage.getItem("confidant.notifications")==="yes") $("btnEnableNotifications").textContent="Notifications activées";
     await refreshConversationList();
-    if (location.hash && location.hash.includes("id=")) {
+    if ((location.hash && location.hash.includes("id=")) || new URLSearchParams(location.search).has("id")) {
       await joinFromLink(location.href);
       return;
     }
