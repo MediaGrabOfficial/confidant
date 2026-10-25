@@ -1,0 +1,13 @@
+{
+  "name": "Confidant — messagerie privée",
+  "short_name": "Confidant",
+  "lang": "fr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#EAE7DF",
+  "theme_color": "#485440",
+  "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
