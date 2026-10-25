@@ -2297,15 +2297,10 @@ async function renderAllFromStore(){ await loadHistory(); }
 /* ======================= QR CODE ======================= */
 
 function showQr(link){
-
   const holder = $("qrHolder");
-
   holder.innerHTML = "";
-
   holder.classList.remove("hidden");
-
-  new QRCode(holder, { text: link, width: 180, height: 180, colorDark:"#22231F", colorLight:"#ffffff" });
-
+  new QRCode(holder, { text: link || buildQrInviteLink(), width: 220, height: 220, colorDark:"#22231F", colorLight:"#ffffff" });
 }
 
 
@@ -2313,11 +2308,85 @@ function showQr(link){
 /* ======================= ÉVÉNEMENTS UI ======================= */
 
 $("btnCreate").addEventListener("click", createConversation);
+
+let scannerStream = null, scannerRaf = 0, scannerBusy = false;
+
+function stopQrScanner(){
+  if (scannerRaf) cancelAnimationFrame(scannerRaf);
+  scannerRaf = 0; scannerBusy = false;
+  if (scannerStream) scannerStream.getTracks().forEach(track => track.stop());
+  scannerStream = null;
+  $("scannerVideo").srcObject = null;
+  $("scannerOverlay").classList.add("hidden");
+}
+
+async function startQrScanner(){
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    $("scannerOverlay").classList.remove("hidden");
+    $("scannerHint").textContent = "Caméra indisponible. Ouvrez Confidant dans l’application ou dans un navigateur compatible."; return;
+  }
+  $("scannerOverlay").classList.remove("hidden");
+  $("scannerHint").textContent = "Autorisez la caméra puis présentez le QR code."; 
+  try {
+    scannerStream = await navigator.mediaDevices.getUserMedia({audio:false, video:{facingMode:{ideal:"environment"}, width:{ideal:1280}}});
+    $("scannerVideo").srcObject = scannerStream;
+    await $("scannerVideo").play();
+    let detector = null;
+    if ("BarcodeDetector" in window) { try { detector = new BarcodeDetector({formats:["qr_code"]}); } catch (e) {} }
+    const video=$("scannerVideo"), canvas=$("scannerCanvas"), context=canvas.getContext("2d",{willReadFrequently:true});
+    const scan = () => {
+      if (!scannerStream) return;
+      scannerRaf=requestAnimationFrame(scan);
+      if (scannerBusy || video.readyState<2 || !video.videoWidth) return;
+      scannerBusy=true;
+      (async()=>{
+        try {
+          let result=null;
+          if (detector) {
+            const codes=await detector.detect(video);
+            if (codes && codes.length) result=codes[0].rawValue;
+          } else if (window.jsQR) {
+            canvas.width=video.videoWidth; canvas.height=video.videoHeight;
+            context.drawImage(video,0,0,canvas.width,canvas.height);
+            const frame=context.getImageData(0,0,canvas.width,canvas.height);
+            const code=jsQR(frame.data,frame.width,frame.height,{inversionAttempts:"dontInvert"});
+            if (code) result=code.data;
+          } else {
+            $("scannerHint").textContent="Le lecteur QR ne s’est pas chargé. Rechargez la page puis réessayez.";
+            stopQrScanner(); return;
+          }
+          if (result) { stopQrScanner(); await joinFromLink(result); }
+        } catch (e) {
+          $("scannerHint").textContent="QR illisible pour le moment. Gardez le code bien éclairé et réessayez.";
+        } finally { scannerBusy=false; }
+      })();
+    };
+    scan();
+  } catch (e) {
+    if (scannerStream) scannerStream.getTracks().forEach(track=>track.stop());
+    scannerStream=null;
+    $("scannerOverlay").classList.remove("hidden");
+    $("scannerHint").textContent="Caméra refusée ou indisponible. Autorisez l’accès à la caméra dans les réglages du téléphone.";
+  }
+}
+
+$("btnScanInvite").addEventListener("click",startQrScanner);
+$("btnStopScanner").addEventListener("click",stopQrScanner);
+$("scannerOverlay").addEventListener("click",event=>{if(event.target===$("scannerOverlay")) stopQrScanner();});
+
 $("btnJoin").addEventListener("click", () => {
   const value = $("joinInput").value.trim();
   if (value) joinFromLink(value);
 });
 $("btnCancelInvite").addEventListener("click", exitToList);
+$("btnChatInvite").addEventListener("click", () => {
+  if (State.role !== "creator") return;
+  $("inviteLinkBox").textContent=buildInviteLink();
+  $("btnShareInvite").classList.toggle("hidden",!navigator.share);
+  $("qrHolder").classList.add("hidden"); $("inviteError").classList.add("hidden");
+  setInviteStatus("waiting",State.peerConnected?"Correspondant connecté":"Invitation prête à partager");
+  showScreen("inviteScreen");
+});
 $("btnViewHistory").addEventListener("click", async () => {
   showScreen("chatScreen");
   updateChatStatus(State.peerConnected ? "connected" : "disconnected",
@@ -2326,6 +2395,15 @@ $("btnViewHistory").addEventListener("click", async () => {
 });
 $("btnCancelJoin").addEventListener("click", exitToList);
 $("btnBackList").addEventListener("click", exitToList);
+
+function updateKeyboardInset(){
+  const vv=window.visualViewport; let inset=0;
+  if(vv){ const gap=window.innerHeight-vv.height-vv.offsetTop; if(gap>120) inset=gap; }
+  document.documentElement.style.setProperty("--keyboard-bottom",inset+"px");
+}
+window.addEventListener("resize",updateKeyboardInset);
+if(window.visualViewport){window.visualViewport.addEventListener("resize",updateKeyboardInset);window.visualViewport.addEventListener("scroll",updateKeyboardInset);}
+updateKeyboardInset();
 
 $("btnCopyInvite").addEventListener("click", async () => {
   const link = $("inviteLinkBox").textContent;
@@ -2337,7 +2415,7 @@ $("btnShareInvite").addEventListener("click", async () => {
   try { await navigator.share({title:"Rejoindre ma conversation Confidant", url:link}); } catch (e) {}
 });
 $("btnShowQr").addEventListener("click", () => {
-  try { showQr($("inviteLinkBox").textContent); }
+  try { showQr(buildQrInviteLink()); }
   catch (e) { showInviteError("La bibliothèque QR n'a pas été chargée. Vérifiez votre connexion."); }
 });
 
@@ -2370,6 +2448,23 @@ $("btnRecord").addEventListener("click", () => {
 });
 
 $("btnSettings").addEventListener("click", () => $("settingsOverlay").classList.remove("hidden"));
+$("btnEnableNotifications").addEventListener("click", async () => {
+  try {
+    if (window.ConfidantAndroid && typeof window.ConfidantAndroid.requestNotifications === "function") {
+      localStorage.setItem("confidant.notifications","yes");
+      window.ConfidantAndroid.requestNotifications();
+      $("btnEnableNotifications").textContent="Notifications activées";
+      pushSystemLine("Notifications activées sur cet appareil quand Confidant reçoit un message connecté.",false); return;
+    }
+    if (!("Notification" in window)) { pushSystemLine("Ce navigateur ne prend pas en charge les notifications. Le son fonctionne lorsque la page est active.",true); return; }
+    const permission=await Notification.requestPermission();
+    if (permission==="granted") {
+      localStorage.setItem("confidant.notifications","yes");
+      $("btnEnableNotifications").textContent="Notifications activées";
+      pushSystemLine("Notifications activées sur ce navigateur.",false);
+    } else pushSystemLine("Les notifications sont bloquées dans les réglages du navigateur.",true);
+  } catch(e) { pushSystemLine("Impossible d’activer les notifications sur cet appareil.",true); }
+});
 $("btnCloseSettings").addEventListener("click", () => $("settingsOverlay").classList.add("hidden"));
 $("ttlSelect").addEventListener("change", async (event) => {
   State.ttlMs = parseInt(event.target.value, 10);
@@ -2409,7 +2504,7 @@ window.addEventListener("beforeunload", () => {
   try {
     await Store.cleanupExpired();
     await refreshConversationList();
-    if (location.hash && location.hash.includes("id=")) {
+    if ((location.hash && location.hash.includes("id=")) || new URLSearchParams(location.search).has("id")) {
       await joinFromLink(location.href);
       return;
     }
