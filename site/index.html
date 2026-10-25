@@ -1520,6 +1520,7 @@ function wireConnection(conn, isCreator){
     State.conn = null;
     State.peerConnected = false; State.sessionKey = null; State.incomingTransfers = new Map();
     try { await requeueUnconfirmedTexts(boundConvId); } catch(e) {}
+    try { await requeueUnconfirmedFiles(boundConvId); } catch(e) {}
     saveConversationPatch(boundConvId,{connectionStatus:"offline",lastActivity:Date.now()}).catch(()=>{});
     if (State.role === "creator") {
       setInviteStatus("waiting","Déconnecté — invitation toujours valable");
@@ -1595,10 +1596,20 @@ async function finalizeSession(){
 
 async function requeueUnconfirmedTexts(convId){
   const messages=await Store.allByConv(convId);
-  for (const record of messages) {
-    if (record.from==="me" && record.kind==="text" && ["sending","sent"].includes(record.status)) {
-      record.status="queued"; await Store.put("messages",record);
-      if (State.convId===convId) updateMessageStatus(record);
+  for(const record of messages){
+    if(record.from==="me" && record.kind==="text" && ["sending","sent"].includes(record.status)){
+      record.status="queued";await Store.put("messages",record);
+      if(State.convId===convId) updateMessageStatus(record);
+    }
+  }
+}
+
+async function requeueUnconfirmedFiles(convId){
+  const messages=await Store.allByConv(convId);
+  for(const record of messages){
+    if(record.from==="me" && ["image","video","audio"].includes(record.kind) && ["sending","sent"].includes(record.status)){
+      record.status="queued";await Store.put("messages",record);
+      if(State.convId===convId) updateMessageStatus(record);
     }
   }
 }
@@ -1686,13 +1697,16 @@ async function transmitTextRecord(record){
 }
 
 async function flushQueuedMessages(){
-  if (!State.convId || !State.peerConnected || !State.sessionKey) return;
+  if(!State.convId || !State.peerConnected || !State.sessionKey) return;
   const convId=State.convId, list=await Store.allByConv(convId);
   list.sort((a,b)=>a.ts-b.ts);
-  for (const record of list) {
-    if (State.convId!==convId || !State.peerConnected) return;
-    if (record.from==="me" && record.kind==="text" && ["queued","sent"].includes(record.status)) {
+  for(const record of list){
+    if(State.convId!==convId || !State.peerConnected) return;
+    if(record.from!=="me") continue;
+    if(record.kind==="text" && ["queued","sent"].includes(record.status)){
       await transmitTextRecord(record);
+    } else if(["image","video","audio"].includes(record.kind) && record.status==="queued"){
+      await transmitFileRecord(record);
     }
   }
 }
@@ -1800,99 +1814,64 @@ function maxForKind(kind){
 
 
 async function sendFile(file, kind){
-
-  if (!State.peerConnected){ pushSystemLine("Pas de connexion active : envoi impossible.", true); return; }
-
-  const max = maxForKind(kind);
-
-  if (file.size > max){
-
-    pushSystemLine(`Fichier trop volumineux (max ${(max/1024/1024).toFixed(0)} Mo).`, true);
-
-    return;
-
-  }
-
-  const buf = await file.arrayBuffer();
-
-  const total = Math.ceil(buf.byteLength / CHUNK_SIZE) || 1;
-
-  const transferId = randomId(9);
-
-  const id = State.convId + "-" + State.myId + "-f-" + transferId;
-
-
-
-  const localUrl = URL.createObjectURL(file);
-
-  const record = {
-
-    id, convId: State.convId, from:"me", kind, mime:file.type, transferId:transferId, ts: Date.now(),
-
-    expiresAt: Date.now()+State.ttlMs, status:"sending", progress:0, _localUrl: localUrl
-
-  };
-
+  if (!State.convId || !State.myId) { pushSystemLine("Ouvrez une conversation avant d’envoyer un fichier.", true); return; }
+  const max=maxForKind(kind);
+  if(file.size>max){ pushSystemLine(`Fichier trop volumineux (max ${(max/1024/1024).toFixed(0)} Mo).`,true); return; }
+  const transferId=randomId(9);
+  const id=State.convId+"-"+State.myId+"-f-"+transferId;
+  const now=Date.now();
+  const localUrl=URL.createObjectURL(file);
+  const record={id,convId:State.convId,from:"me",kind,mime:file.type,transferId,ts:now,
+    expiresAt:now+State.ttlMs,status:State.peerConnected?"sending":"queued",progress:0,_localUrl:localUrl};
+  const stored={...record,_localUrl:undefined,blob:file};
+  await Store.put("messages",stored);
   renderMessage(record);
-
-
-
-  // on stocke le fichier déchiffré localement (c'est NOTRE copie) pour
-
-  // l'historique local ; il reste protégé par l'éventuel verrou local.
-
-  const blobCopy = file.slice(0,0).type ? file : file; // conserve le Blob d'origine
-
-  await Store.put("messages", { ...record, _localUrl: undefined, blob: file });
-
-
-
-  let sentBytes = 0;
-
-  for (let i=0; i<total; i++){
-
-    const start = i*CHUNK_SIZE, end = Math.min(start+CHUNK_SIZE, buf.byteLength);
-
-    const chunkBytes = new Uint8Array(buf.slice(start, end));
-
-    const aad = `${State.convId}|${transferId}|${i}|${total}|${kind}`;
-
-    const { iv, ct } = await Crypto.encrypt(State.sessionKey, aad, chunkBytes);
-
-    try{
-
-      State.conn.send({ t:"chunk", transferId, index:i, total, kind, mime:file.type, iv, ct, size: buf.byteLength });
-
-    } catch(e){
-
-      record.status = "failed";
-
-      updateMessageStatus(record);
-
-      return;
-
-    }
-
-    sentBytes = end;
-
-    updateProgress(id, Math.round(sentBytes/buf.byteLength*100));
-
-    // laisse respirer la boucle d'événements pour l'UI et le canal
-
-    await new Promise(r => setTimeout(r, 0));
-
+  await saveConversationPatch(State.convId,{
+    lastMessage:kind==="image"?"Vous : photo":kind==="video"?"Vous : vidéo":"Vous : message vocal",
+    lastActivity:now
+  });
+  if(!State.peerConnected){
+    pushSystemLine("Fichier conservé dans la file d’envoi. Il partira quand la connexion reviendra.",false);
+    return;
   }
-
-  record.status = "sent";
-
-  record.progress = 100;
-
-  await Store.put("messages", { ...record, _localUrl: undefined, blob: file });
-  updateMessageStatus(record);
-
+  await transmitFileRecord(stored,file);
 }
 
-
+async function transmitFileRecord(record,fileOverride){
+  const convId=record.convId, conn=State.conn, key=State.sessionKey;
+  const file=fileOverride || record.blob;
+  if(!file || !State.peerConnected || !conn || !key || State.convId!==convId){
+    record.status="queued"; await Store.put("messages",record); updateMessageStatus(record); return;
+  }
+  record.status="sending"; await Store.put("messages",record); updateMessageStatus(record);
+  let buffer;
+  try { buffer=await file.arrayBuffer(); }
+  catch(e){record.status="queued";await Store.put("messages",record);updateMessageStatus(record);return;}
+  const max=maxForKind(record.kind);
+  if(buffer.byteLength>max){record.status="failed";await Store.put("messages",record);updateMessageStatus(record);return;}
+  const total=Math.ceil(buffer.byteLength/CHUNK_SIZE)||1;
+  for(let i=0;i<total;i++){
+    if(State.convId!==convId || State.conn!==conn || !State.peerConnected){
+      record.status="queued";await Store.put("messages",record);updateMessageStatus(record);return;
+    }
+    const start=i*CHUNK_SIZE,end=Math.min(start+CHUNK_SIZE,buffer.byteLength);
+    const bytes=new Uint8Array(buffer.slice(start,end));
+    const aad=convId+"|"+record.transferId+"|"+i+"|"+total+"|"+record.kind;
+    try{
+      const encrypted=await Crypto.encrypt(key,aad,bytes);
+      if(State.convId!==convId || State.conn!==conn || !State.peerConnected){
+        record.status="queued";await Store.put("messages",record);updateMessageStatus(record);return;
+      }
+      conn.send({t:"chunk",transferId:record.transferId,index:i,total,kind:record.kind,mime:record.mime,
+        iv:encrypted.iv,ct:encrypted.ct,size:buffer.byteLength});
+    }catch(e){record.status="queued";await Store.put("messages",record);updateMessageStatus(record);return;}
+    record.progress=Math.round(end/buffer.byteLength*100);
+    updateProgress(record.id,record.progress);
+    await new Promise(resolve=>setTimeout(resolve,0));
+  }
+  record.status="sent";record.progress=100;
+  await Store.put("messages",record);updateMessageStatus(record);
+}
 
 async function receiveChunk(msg){
   const {transferId,index,total,kind,mime,iv,ct,size}=msg, max=maxForKind(kind);
